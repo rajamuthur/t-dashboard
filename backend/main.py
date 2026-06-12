@@ -19,12 +19,19 @@ from .routers.trades import router as trades_router
 
 
 def create_app() -> FastAPI:
+    # Scheduler runs Fyers-dependent sync jobs. Disable it where those creds
+    # aren't wired (e.g. Fly free tier) so the logs stay clean and the
+    # auto-stopping machine isn't kept awake for jobs that can't run.
+    scheduler_enabled = (os.getenv("ENABLE_SCHEDULER", "true").lower() != "false")
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await init_db()
-        start_scheduler()
+        if scheduler_enabled:
+            start_scheduler()
         yield
-        stop_scheduler()
+        if scheduler_enabled:
+            stop_scheduler()
 
     application = FastAPI(title="Fyers Dashboard API", version="1.0.0", lifespan=lifespan)
 

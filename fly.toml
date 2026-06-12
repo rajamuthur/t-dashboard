@@ -1,0 +1,37 @@
+# Fly.io config for the FastAPI backend.
+# Rename `app` to whatever you pass to `flyctl launch` (must be globally unique).
+# Free URL will be: https://<app>.fly.dev
+app = "t-dashboard-api"
+primary_region = "sin"   # Singapore — lowest latency to India; change if you prefer
+
+[build]
+
+# Non-secret config. Real secrets (JWT_SECRET, ADMIN_*, CORS_ORIGINS, OPENAI_API_KEY,
+# Fyers keys) are injected with `flyctl secrets set` and never live here.
+[env]
+  ENV = "production"
+  DB_PATH = "/app/data/fyers_data.db"
+  ENABLE_SCHEDULER = "false"   # set "true" only after wiring Fyers creds
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"   # machine sleeps when idle (free-tier friendly)
+  auto_start_machines = true    # wakes on the next request (~few-sec cold start)
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+# Persistent disk so your trades survive deploys/restarts.
+# Create once with:  flyctl volumes create data --size 1
+[[mounts]]
+  source = "data"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

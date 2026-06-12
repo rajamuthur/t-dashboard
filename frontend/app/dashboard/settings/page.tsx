@@ -4,8 +4,11 @@ import {
   getConfig, setConfig, refreshFoStocks,
   WeekBucket,
 } from "@/lib/api";
+import {
+  getTelegramConfig, saveTelegramConfig, testTelegram,
+} from "@/lib/telegramApi";
 import StockListEditor from "@/components/StockListEditor";
-import { RefreshCw, Save, Check, AlertCircle } from "lucide-react";
+import { RefreshCw, Save, Check, AlertCircle, Send } from "lucide-react";
 
 // ── Tiny reusable helpers ─────────────────────────────────────────────────────
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -46,7 +49,7 @@ function SaveBtn({ onClick, saving, saved }: { onClick: () => void; saving: bool
 }
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
-const TABS = ["Weekly", "Monthly", "Notifications", "F&O & Holidays"] as const;
+const TABS = ["Weekly", "Monthly", "Notifications", "Telegram", "F&O & Holidays"] as const;
 type Tab = typeof TABS[number];
 
 export default function SettingsPage() {
@@ -79,6 +82,17 @@ export default function SettingsPage() {
   const [waApiKey,    setWaApiKey]    = useState("");
   const [waSaving,    setWaSaving]    = useState(false);
   const [waSaved,     setWaSaved]     = useState(false);
+
+  // ── Telegram config ────────────────────────────────────────────────────────
+  const [tgEnabled,   setTgEnabled]   = useState(false);
+  const [tgChatId,    setTgChatId]    = useState("");
+  const [tgToken,     setTgToken]     = useState("");        // only sent if non-empty
+  const [tgTokenSet,  setTgTokenSet]  = useState(false);
+  const [tgTokenHint, setTgTokenHint] = useState("");
+  const [tgSaving,    setTgSaving]    = useState(false);
+  const [tgSaved,     setTgSaved]     = useState(false);
+  const [tgTesting,   setTgTesting]   = useState(false);
+  const [tgMsg,       setTgMsg]       = useState("");
 
   // ── F&O ───────────────────────────────────────────────────────────────────
   const [foCount,     setFoCount]     = useState<number | null>(null);
@@ -123,6 +137,14 @@ export default function SettingsPage() {
         setWaApiKey(recs[0].apikey ?? "");
       }
     }).catch(console.error).finally(() => setLoading(false));
+
+    // Telegram config loads from its own (token-masking) endpoint.
+    getTelegramConfig().then(tg => {
+      setTgEnabled(tg.enabled);
+      setTgChatId(tg.chat_id);
+      setTgTokenSet(tg.bot_token_set);
+      setTgTokenHint(tg.bot_token_hint);
+    }).catch(console.error);
   }, []);
 
   // ── Save handlers ──────────────────────────────────────────────────────────
@@ -158,6 +180,36 @@ export default function SettingsPage() {
       });
       setWaSaved(true); setTimeout(() => setWaSaved(false), 2500);
     } finally { setWaSaving(false); }
+  }
+
+  async function saveTelegram() {
+    setTgSaving(true);
+    setTgMsg("");
+    try {
+      const res = await saveTelegramConfig({
+        enabled: tgEnabled,
+        chat_id: tgChatId.trim(),
+        // Only send the token if the user typed a new one; blank keeps the stored one.
+        ...(tgToken.trim() ? { bot_token: tgToken.trim() } : {}),
+      });
+      setTgTokenSet(res.bot_token_set);
+      setTgToken("");  // clear the input after saving the secret
+      setTgSaved(true); setTimeout(() => setTgSaved(false), 2500);
+    } catch (e: unknown) {
+      setTgMsg(`Error: ${e instanceof Error ? e.message : "Save failed"}`);
+    } finally { setTgSaving(false); }
+  }
+
+  async function handleTgTest() {
+    setTgTesting(true);
+    setTgMsg("");
+    try {
+      await testTelegram();
+      setTgMsg("✓ Test message sent — check your Telegram.");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : "Test failed";
+      setTgMsg(`Error: ${m.replace(/^API \d+:\s*/, "")}`);
+    } finally { setTgTesting(false); }
   }
 
   async function handleFoRefresh() {
@@ -299,6 +351,68 @@ export default function SettingsPage() {
               </div>
             </div>
             <SaveBtn onClick={saveWhatsApp} saving={waSaving} saved={waSaved} />
+          </Card>
+        </div>
+      )}
+
+      {/* ── Telegram tab ───────────────────────────────────────────────────── */}
+      {activeTab === "Telegram" && (
+        <div className="space-y-5">
+          <Card title="Telegram Bot">
+            <div className="bg-blue-950/30 border border-blue-800 rounded-lg px-4 py-3 text-xs text-blue-300 space-y-1">
+              <p className="font-semibold">One-time setup:</p>
+              <ol className="list-decimal ml-4 space-y-1">
+                <li>In Telegram, open <span className="font-mono">@BotFather</span> → send <span className="font-mono">/newbot</span> → follow prompts → copy the <b>bot token</b>.</li>
+                <li>Send any message to your new bot (so it can message you back).</li>
+                <li>Get your <b>chat ID</b>: open <span className="font-mono">@userinfobot</span> and it replies with your numeric ID. (For a group, add the bot to the group and use the group's ID.)</li>
+                <li>Paste both below, Save, then hit <b>Send test</b>.</li>
+              </ol>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input type="checkbox" id="tg-enabled" checked={tgEnabled}
+                onChange={e => setTgEnabled(e.target.checked)}
+                className="w-4 h-4 accent-brand-600 cursor-pointer" />
+              <label htmlFor="tg-enabled" className="text-sm text-gray-300 cursor-pointer">
+                Enable Telegram sending
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <Label>Bot Token {tgTokenSet && <span className="text-green-400">(saved: {tgTokenHint})</span>}</Label>
+                <Input value={tgToken} onChange={setTgToken} type="password"
+                  placeholder={tgTokenSet ? "•••••••• (leave blank to keep)" : "123456:ABC-DEF…"} />
+              </div>
+              <div>
+                <Label>Chat ID</Label>
+                <Input value={tgChatId} onChange={setTgChatId} placeholder="e.g. 123456789" />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <SaveBtn onClick={saveTelegram} saving={tgSaving} saved={tgSaved} />
+              <button
+                onClick={handleTgTest}
+                disabled={tgTesting || !tgTokenSet || !tgChatId.trim()}
+                className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50
+                           text-white text-sm px-4 py-1.5 rounded-lg transition"
+                title={!tgTokenSet || !tgChatId.trim() ? "Save token + chat id first" : "Send a test message"}
+              >
+                {tgTesting ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} />}
+                {tgTesting ? "Sending…" : "Send test"}
+              </button>
+            </div>
+
+            {tgMsg && (
+              <div className={`text-sm px-3 py-2 rounded-lg ${tgMsg.startsWith("Error") ? "bg-red-950/40 text-red-300" : "bg-green-950/40 text-green-300"}`}>
+                {tgMsg}
+              </div>
+            )}
+
+            <p className="text-xs text-gray-600">
+              Used by the "Send to Telegram" buttons on the Weekly / Monthly / Daily analysis pages and the Trades page.
+            </p>
           </Card>
         </div>
       )}

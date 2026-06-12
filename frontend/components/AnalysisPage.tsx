@@ -11,8 +11,9 @@ import OutcomeModal from "@/components/OutcomeModal";
 import {
   ChevronDown, ChevronUp, Filter, RefreshCw,
   ChevronLeft, ChevronRight, ArrowUp, ArrowDown,
-  ChevronsUpDown, Zap, X, History,
+  ChevronsUpDown, Zap, X, History, Send,
 } from "lucide-react";
+import { sendToTelegram } from "@/lib/telegramApi";
 import { toast } from "sonner";
 import Spinner from "@/components/Spinner";
 import SyncHistoryModal from "@/components/SyncHistoryModal";
@@ -60,12 +61,14 @@ function periodClosed(candleDate: string, timeframe: "week" | "month"): boolean 
 
 // ── Shared signal row ────────────────────────────────────────────────────────
 function SignalRow({
-  item, onOpen, onFetch, fetchingId,
+  item, onOpen, onFetch, fetchingId, selected, onToggleSelect,
 }: {
   item: ScanResultFull;
   onOpen: (item: ScanResultFull) => void;
   onFetch: (item: ScanResultFull, e: React.MouseEvent) => void;
   fetchingId: number | null;
+  selected: boolean;
+  onToggleSelect: (id: number) => void;
 }) {
   const risk = item.details
     ? Math.abs((item.details.entry_close ?? 0) - (item.details.stop_loss ?? 0))
@@ -75,9 +78,17 @@ function SignalRow({
   return (
     <div
       onClick={() => onOpen(item)}
-      className="grid grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1fr] gap-0
-                 border-t border-gray-800 cursor-pointer hover:bg-gray-800/40 transition"
+      className={`grid grid-cols-[auto_2fr_1.2fr_1fr_1fr_1fr_1fr] gap-0
+                 border-t border-gray-800 cursor-pointer hover:bg-gray-800/40 transition ${selected ? "bg-sky-500/5" : ""}`}
     >
+      <div className="pl-4 pr-1 py-3 flex items-center" onClick={e => e.stopPropagation()}>
+        <input
+          type="checkbox"
+          className="w-3.5 h-3.5 accent-sky-500"
+          checked={selected}
+          onChange={() => onToggleSelect(item.id)}
+        />
+      </div>
       <div className="px-4 py-3 flex items-center gap-2">
         <span className="font-semibold text-white text-sm">
           {item.symbol.replace("NSE:", "").replace("-EQ", "")}
@@ -119,7 +130,8 @@ function SkeletonRows({ count = 6 }: { count?: number }) {
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="grid grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1fr] gap-0 border-t border-gray-800 animate-pulse">
+        <div key={i} className="grid grid-cols-[auto_2fr_1.2fr_1fr_1fr_1fr_1fr] gap-0 border-t border-gray-800 animate-pulse">
+          <div className="pl-4 pr-1 py-3"><div className="h-4 w-4 bg-gray-700 rounded" /></div>
           <div className="px-4 py-3"><div className="h-4 bg-gray-700 rounded w-24" /></div>
           <div className="px-4 py-3"><div className="h-4 bg-gray-700 rounded w-20" /></div>
           <div className="px-4 py-3 flex justify-end"><div className="h-4 bg-gray-700 rounded w-16" /></div>
@@ -134,10 +146,12 @@ function SkeletonRows({ count = 6 }: { count?: number }) {
 
 // ── Column headers ───────────────────────────────────────────────────────────
 function ColHeaders({
-  sortBy, sortDir, onSort,
+  sortBy, sortDir, onSort, allChecked, onToggleAll,
 }: {
   sortBy: SortField; sortDir: SortDir;
   onSort: (f: SortField) => void;
+  allChecked: boolean;
+  onToggleAll: (checked: boolean) => void;
 }) {
   function Icon({ field }: { field: SortField }) {
     if (sortBy !== field) return <ChevronsUpDown size={12} className="ml-1 text-gray-600" />;
@@ -146,7 +160,11 @@ function ColHeaders({
       : <ArrowDown size={12} className="ml-1 text-brand-500" />;
   }
   return (
-    <div className="bg-gray-800 grid grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1fr] text-xs text-gray-400 font-medium">
+    <div className="bg-gray-800 grid grid-cols-[auto_2fr_1.2fr_1fr_1fr_1fr_1fr] text-xs text-gray-400 font-medium">
+      <div className="pl-4 pr-1 py-3 flex items-center">
+        <input type="checkbox" className="w-3.5 h-3.5 accent-sky-500" title="Select all shown"
+          checked={allChecked} onChange={e => onToggleAll(e.target.checked)} />
+      </div>
       <button onClick={() => onSort("symbol")}      className="flex items-center px-4 py-3 hover:text-white text-left">Symbol      <Icon field="symbol" /></button>
       <button onClick={() => onSort("candle_date")} className="flex items-center px-4 py-3 hover:text-white text-left">Signal Date <Icon field="candle_date" /></button>
       <div className="px-4 py-3 text-right">Entry</div>
@@ -205,6 +223,19 @@ export default function AnalysisPage({ timeframe }: Props) {
 
   // Sync history popup
   const [showHistory, setShowHistory] = useState(false);
+
+  // Telegram selection
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState<string | null>(null);
+
+  function toggleSelect(id: number) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!showFilters) return;
@@ -344,6 +375,40 @@ export default function AnalysisPage({ timeframe }: Props) {
 
   const totalPages = Math.ceil(total / pageSize);
 
+  // All signals currently rendered (weekly buckets or monthly groups).
+  const visibleItems: ScanResultFull[] = timeframe === "week"
+    ? weekBuckets.flatMap(b => b.signals)
+    : groups.flatMap(g => g.items);
+  const allChecked = visibleItems.length > 0 && visibleItems.every(s => selected.has(s.id));
+
+  function toggleAll(checked: boolean) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (checked) visibleItems.forEach(s => next.add(s.id));
+      else visibleItems.forEach(s => next.delete(s.id));
+      return next;
+    });
+  }
+
+  async function sendSelected() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setSending(true);
+    setSendMsg(null);
+    const label = timeframe === "week" ? "📊 Weekly Analysis" : "📊 Monthly Analysis";
+    try {
+      await sendToTelegram("scans", ids, label);
+      setSendMsg(`Sent ${ids.length} signal(s) to Telegram`);
+      setSelected(new Set());
+      toast.success(`Sent ${ids.length} signal(s) to Telegram`);
+      setTimeout(() => setSendMsg(null), 3000);
+    } catch (e: unknown) {
+      const m = (e instanceof Error ? e.message : "Send failed").replace(/^API \d+:\s*/, "");
+      setSendMsg(`Error: ${m}`);
+      toast.error(m);
+    } finally { setSending(false); }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5">
@@ -377,6 +442,19 @@ export default function AnalysisPage({ timeframe }: Props) {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">{title}</h1>
         <div className="flex items-center gap-3">
+          {/* Send to Telegram */}
+          {selected.size > 0 && (
+            <button
+              onClick={sendSelected}
+              disabled={sending}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-sky-600 hover:bg-sky-500 text-white transition disabled:opacity-50"
+              title="Send selected signals to Telegram"
+            >
+              {sending ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
+              Send {selected.size} to Telegram
+            </button>
+          )}
+
           {/* Sync history button */}
           <button
             onClick={() => setShowHistory(true)}
@@ -518,7 +596,7 @@ export default function AnalysisPage({ timeframe }: Props) {
       {/* ── WEEKLY: week-calendar view ─────────────────────────────────────── */}
       {timeframe === "week" && (
         <div className="rounded-xl border border-gray-800 overflow-hidden">
-          <ColHeaders sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+          <ColHeaders sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} allChecked={allChecked} onToggleAll={toggleAll} />
 
           {loading ? (
             <SkeletonRows />
@@ -593,6 +671,8 @@ export default function AnalysisPage({ timeframe }: Props) {
                       onOpen={handleOpenModal}
                       onFetch={handleFetchOutcome}
                       fetchingId={fetchingId}
+                      selected={selected.has(item.id)}
+                      onToggleSelect={toggleSelect}
                     />
                   ))}
                 </div>
@@ -623,7 +703,7 @@ export default function AnalysisPage({ timeframe }: Props) {
           </div>
 
           <div className="rounded-xl border border-gray-800 overflow-hidden">
-            <ColHeaders sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
+            <ColHeaders sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} allChecked={allChecked} onToggleAll={toggleAll} />
 
             {loading ? (
               <SkeletonRows />
@@ -654,6 +734,8 @@ export default function AnalysisPage({ timeframe }: Props) {
                         onOpen={handleOpenModal}
                         onFetch={handleFetchOutcome}
                         fetchingId={fetchingId}
+                        selected={selected.has(item.id)}
+                        onToggleSelect={toggleSelect}
                       />
                     ))}
                   </div>

@@ -2,13 +2,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Play, RefreshCw, ChevronDown, ChevronRight, Clock,
-  TrendingDown, Search, X, Activity,
+  TrendingDown, Search, X, Activity, Send,
 } from "lucide-react";
 import {
   runDailyScan, getDailyScanStatus, getDailyScanSessions, getDailyResults,
   getDailyScanDetail, DailyScanSession, DailyScanResult, DailyScanDetail,
   AIAnalysis, DailyScanStatus,
 } from "@/lib/api";
+import { sendToTelegram } from "@/lib/telegramApi";
 import PatternChart from "./PatternChart";
 import AIAnalysisPanel from "./AIAnalysisPanel";
 
@@ -36,6 +37,33 @@ export default function DailyAnalysisPage() {
   const [detailCache,  setDetailCache]  = useState<Record<number, DailyScanDetail>>({});
   const [aiCache,      setAiCache]      = useState<Record<number, AIAnalysis>>({});
   const [loadingDetail, setLoadingDetail] = useState<number | null>(null);
+
+  // Telegram selection
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [sending,  setSending]  = useState(false);
+  const [sendMsg,  setSendMsg]  = useState<string | null>(null);
+
+  function toggleSelect(id: number) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function sendSelected() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setSending(true); setSendMsg(null);
+    try {
+      await sendToTelegram("scans", ids, "📊 Daily Patterns");
+      setSendMsg(`Sent ${ids.length} signal(s) to Telegram`);
+      setSelected(new Set());
+      setTimeout(() => setSendMsg(null), 3000);
+    } catch (e: any) {
+      setSendMsg(`Error: ${(e?.message || "Send failed").replace(/^API \d+:\s*/, "")}`);
+    } finally { setSending(false); }
+  }
 
   // Load sessions on mount
   useEffect(() => {
@@ -145,16 +173,35 @@ export default function DailyAnalysisPage() {
           </div>
           <p className="text-sm text-gray-400 mt-0.5">Tight range + volume compression setup on F&O stocks</p>
         </div>
-        <button
-          onClick={handleRunScan}
-          disabled={running}
-          className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 rounded-lg text-sm font-medium text-white transition"
-        >
-          {running
-            ? <><RefreshCw size={15} className="animate-spin" /> Scanning…</>
-            : <><Play size={15} /> Run Scan</>}
-        </button>
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <button
+              onClick={sendSelected}
+              disabled={sending}
+              className="flex items-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 rounded-lg text-sm font-medium text-white transition"
+              title="Send selected signals to Telegram"
+            >
+              {sending ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />}
+              Send {selected.size} to Telegram
+            </button>
+          )}
+          <button
+            onClick={handleRunScan}
+            disabled={running}
+            className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 rounded-lg text-sm font-medium text-white transition"
+          >
+            {running
+              ? <><RefreshCw size={15} className="animate-spin" /> Scanning…</>
+              : <><Play size={15} /> Run Scan</>}
+          </button>
+        </div>
       </div>
+
+      {sendMsg && (
+        <div className={`text-xs px-3 py-2 rounded-lg ${sendMsg.startsWith("Error") ? "bg-red-950/40 text-red-300" : "bg-green-950/40 text-green-300"}`}>
+          {sendMsg}
+        </div>
+      )}
 
       {/* Scan progress */}
       {scanStatus && scanStatus.status === "running" && (
@@ -245,6 +292,16 @@ export default function DailyAnalysisPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wide">
+              <th className="w-8 px-3 py-3">
+                <input type="checkbox" className="w-3.5 h-3.5 accent-sky-500 align-middle" title="Select all shown"
+                  checked={results.length > 0 && results.every(r => selected.has(r.id))}
+                  onChange={e => setSelected(prev => {
+                    const next = new Set(prev);
+                    if (e.target.checked) results.forEach(r => next.add(r.id));
+                    else results.forEach(r => next.delete(r.id));
+                    return next;
+                  })} />
+              </th>
               <th className="w-8 px-4 py-3" />
               <SortTh label="Symbol"   col="symbol"      sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} />
               <th className="px-4 py-3 text-right">Close ₹</th>
@@ -259,7 +316,7 @@ export default function DailyAnalysisPage() {
           <tbody>
             {results.length === 0 && (
               <tr>
-                <td colSpan={9} className="text-center py-12 text-gray-500">
+                <td colSpan={10} className="text-center py-12 text-gray-500">
                   {sessions.length === 0
                     ? 'No scans yet. Click "Run Scan" to start.'
                     : "No results match the current filters."}
@@ -275,8 +332,12 @@ export default function DailyAnalysisPage() {
                 <tr
                   key={r.id}
                   onClick={() => handleRowClick(r)}
-                  className="border-b border-gray-800/60 hover:bg-gray-800/40 cursor-pointer transition"
+                  className={`border-b border-gray-800/60 hover:bg-gray-800/40 cursor-pointer transition ${selected.has(r.id) ? "bg-sky-500/5" : ""}`}
                 >
+                  <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" className="w-3.5 h-3.5 accent-sky-500 align-middle"
+                      checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} />
+                  </td>
                   <td className="pl-4 py-3 text-gray-500">
                     {loadingDetail === r.id
                       ? <RefreshCw size={13} className="animate-spin" />
@@ -313,7 +374,7 @@ export default function DailyAnalysisPage() {
 
                 expanded && (
                   <tr key={`${r.id}-detail`} className="bg-gray-900/80 border-b border-gray-800">
-                    <td colSpan={9} className="px-6 py-5">
+                    <td colSpan={10} className="px-6 py-5">
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                         {/* Chart */}
                         <div>

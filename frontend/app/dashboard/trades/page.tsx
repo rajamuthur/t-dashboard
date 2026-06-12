@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, X, CheckCircle2, Pencil, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Plus, RefreshCw, X, CheckCircle2, Pencil, ArrowUp, ArrowDown, ArrowUpDown, Send } from "lucide-react";
 import NewTradeForm from "@/components/NewTradeForm";
 import EditOpenTradeForm from "@/components/EditOpenTradeForm";
 import CloseTradeForm from "@/components/CloseTradeForm";
@@ -9,6 +9,7 @@ import {
   listTrades, getDashboard, refreshAll, refreshOne,
   deleteTrade,
 } from "@/lib/tradesApi";
+import { sendToTelegram } from "@/lib/telegramApi";
 import { fmtIsoDateTime } from "@/lib/dates";
 
 type SortKey =
@@ -49,6 +50,33 @@ export default function TradesPage() {
   const [filter, setFilter] = useState<"open" | "closed" | "all">("open");
   const [sortKey, setSortKey] = useState<SortKey>("entry_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [sending, setSending] = useState(false);
+  const [sendMsg, setSendMsg] = useState<string | null>(null);
+
+  function toggleSelect(id: number) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function sendSelectedToTelegram() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setSending(true);
+    setSendMsg(null);
+    try {
+      await sendToTelegram("trades", ids, "💼 Trades & P&L");
+      setSendMsg(`Sent ${ids.length} trade(s) to Telegram`);
+      setSelected(new Set());
+      setTimeout(() => setSendMsg(null), 3000);
+    } catch (e: any) {
+      const m = (e?.message || "Send failed").replace(/^API \d+:\s*/, "");
+      setSendMsg(`Error: ${m}`);
+    } finally { setSending(false); }
+  }
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir(d => (d === "asc" ? "desc" : "asc"));
@@ -160,6 +188,17 @@ export default function TradesPage() {
       <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800 bg-gray-900">
         <h1 className="text-lg font-semibold text-white">Trades & P&L</h1>
         <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <button
+              onClick={sendSelectedToTelegram}
+              disabled={sending}
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs disabled:opacity-50"
+              title="Send selected trades to Telegram"
+            >
+              {sending ? <RefreshCw size={12} className="animate-spin" /> : <Send size={12} />}
+              Send {selected.size} to Telegram
+            </button>
+          )}
           <button
             onClick={onRefreshAll}
             disabled={refreshing}
@@ -236,11 +275,33 @@ export default function TradesPage() {
           ))}
         </div>
 
+        {sendMsg && (
+          <div className={`text-xs px-3 py-2 rounded-lg ${sendMsg.startsWith("Error") ? "bg-red-950/40 text-red-300" : "bg-green-950/40 text-green-300"}`}>
+            {sendMsg}
+          </div>
+        )}
+
         {/* Trades table */}
         <div className="overflow-x-auto rounded-lg border border-gray-800">
           <table className="min-w-full text-xs">
             <thead className="bg-gray-900 text-gray-400">
               <tr>
+                <th className="px-3 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    className="w-3.5 h-3.5 accent-sky-500 align-middle"
+                    title="Select all shown"
+                    checked={visible.length > 0 && visible.every(t => selected.has(t.id))}
+                    onChange={e => {
+                      setSelected(prev => {
+                        const next = new Set(prev);
+                        if (e.target.checked) visible.forEach(t => next.add(t.id));
+                        else visible.forEach(t => next.delete(t.id));
+                        return next;
+                      });
+                    }}
+                  />
+                </th>
                 <SortHeader k="symbol">Symbol</SortHeader>
                 <SortHeader k="instrument_type">Type</SortHeader>
                 <SortHeader k="side">Side</SortHeader>
@@ -256,13 +317,21 @@ export default function TradesPage() {
             </thead>
             <tbody className="divide-y divide-gray-800 bg-gray-950">
               {loading && (
-                <tr><td colSpan={11} className="text-gray-500 text-center py-6">Loading…</td></tr>
+                <tr><td colSpan={12} className="text-gray-500 text-center py-6">Loading…</td></tr>
               )}
               {!loading && visible.length === 0 && (
-                <tr><td colSpan={11} className="text-gray-500 text-center py-6">No trades yet — click <span className="text-white">+ New trade</span> to log one.</td></tr>
+                <tr><td colSpan={12} className="text-gray-500 text-center py-6">No trades yet — click <span className="text-white">+ New trade</span> to log one.</td></tr>
               )}
               {visible.map(t => (
-                <tr key={t.id} className="hover:bg-gray-900/70">
+                <tr key={t.id} className={`hover:bg-gray-900/70 ${selected.has(t.id) ? "bg-sky-500/5" : ""}`}>
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      className="w-3.5 h-3.5 accent-sky-500 align-middle"
+                      checked={selected.has(t.id)}
+                      onChange={() => toggleSelect(t.id)}
+                    />
+                  </td>
                   <td className="px-3 py-2 text-gray-100 font-mono">{t.symbol}</td>
                   <td className="px-3 py-2 capitalize text-gray-300">{t.instrument_type}</td>
                   <td className="px-3 py-2">

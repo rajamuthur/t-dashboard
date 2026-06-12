@@ -181,6 +181,11 @@ async def _seed_default_config() -> None:
                 {"phone": "9677132280", "apikey": ""}
             ]
         },
+        "telegram_config": {
+            "enabled": False,
+            "bot_token": "",
+            "chat_id": "",
+        },
         "nse_holidays": [],               # populated by POST /holidays/refresh
         "nse_holidays_updated": "",
         "fo_stocks_updated": "",

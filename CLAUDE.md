@@ -9,6 +9,7 @@ A full-stack Indian stock market analysis platform using Fyers API v3. Comprises
 - **Frontend**: Next.js 14 (App Router) dashboard for visualizing signals with interactive charts and AI analysis
 - **Live Charts module** (`/dashboard/live-charts`): configurable 1/2/4/6/8-pane TradingView-style dashboard with pluggable data sources (Hyperliquid crypto WS + yfinance India F&O + yfinance US), 17 built-in indicators, per-pane fullscreen, and market-status pills
 - **Trades & P&L module** (`/dashboard/trades`): manual trade journal for equity / future / option positions (NIFTY, BANKNIFTY, FINNIFTY, SENSEX, stocks). Auto lot-size resolution, expiry calendar (last-Thursday monthly + weekly Thursdays), live mark-to-market for equity/futures via yfinance, dashboard with realized/unrealized P&L and win-rate.
+- **Telegram integration**: manual select-and-send (no automated signals). Row checkboxes on the Weekly/Monthly/Daily analysis pages and the Trades page → "Send to Telegram" posts a formatted text message via the Bot API. Bot token + chat id configured in Settings → Telegram.
 
 ---
 
@@ -31,6 +32,7 @@ project-auth/
 │   ├── data_source.py             # Pluggable Live-Charts data source registry
 │   │                              # (YFinanceIndia, YFinanceUS, Hyperliquid)
 │   ├── trades_catalog.py          # Trades module: F&O lot sizes + expiry calendar
+│   ├── telegram_service.py        # Telegram Bot API sendMessage (config from DB)
 │   ├── downloaders/
 │   │   ├── fyers.py               # FyersDownloader (daily fetch, weekly/monthly resample)
 │   │   └── scheduler.py           # APScheduler-based auto-sync jobs
@@ -43,6 +45,7 @@ project-auth/
 │   │   ├── eow.py                 # End-of-week scan endpoints
 │   │   ├── live_charts.py         # /live-charts/{sources,candles,quote,search}
 │   │   ├── trades.py              # /trades CRUD + dashboard + refresh-price + catalog + expiries
+│   │   ├── telegram.py            # /telegram config + test + send (scans|trades)
 │   │   ├── health.py              # Health checks + token management
 │   │   └── holidays.py            # NSE market holidays
 │   └── scanners/
@@ -91,7 +94,9 @@ project-auth/
 │       ├── indicators.ts          # 17 pure indicator-math functions (SMA/EMA/BB/Ichimoku/...)
 │       ├── indicatorCatalog.ts    # Indicator metadata + color palette (used by the picker)
 │       ├── marketHours.ts         # NYSE / NSE / Hyperliquid session checks (IANA timezone)
-│       └── tradesApi.ts           # Typed client for /trades + dashboard + refresh-price
+│       ├── tradesApi.ts           # Typed client for /trades + dashboard + refresh-price
+│       ├── telegramApi.ts         # Typed client for /telegram config + test + send
+│       └── dates.ts               # Friendly date/datetime formatting + ISO↔local helpers
 │
 ├── tests/                         # Pytest test suite
 ├── archive/                       # Legacy scripts + parquet data (not used by app)
@@ -462,6 +467,57 @@ All routes require JWT auth.
 | POST   | `/trades/{id}/refresh-price` | Pull current price for one trade (equity / future only). Returns the updated trade. **422** if instrument is option. |
 | POST   | `/trades/refresh-all` | Bulk refresh for all open non-option trades. `{ refreshed, skipped }`. |
 | GET    | `/trades/dashboard` | Aggregates: `realized_pnl`, `unrealized_pnl`, `total_pnl`, `win_rate`, `wins/losses`, `by_instrument_type`. |
+
+### Telegram (`/telegram`)
+All routes require JWT auth.
+
+| Method | Path | Description |
+|---|---|---|
+| GET  | `/telegram/config` | `{ enabled, chat_id, bot_token_set, bot_token_hint }` — token is **never** returned raw, only masked. |
+| PUT  | `/telegram/config` | Save `{ enabled, chat_id, bot_token? }`. Blank `bot_token` keeps the stored one (so the UI can save enabled/chat_id without re-sending the secret). |
+| POST | `/telegram/test` | Send a fixed test message to verify the bot token + chat id. |
+| POST | `/telegram/send` | Body `{ kind: "scans"\|"trades", ids: number[], title? }`. Fetches the rows, formats an HTML message, sends. **400** if not configured, **404** if no rows match. |
+
+---
+
+## Telegram Module
+
+Manual "select records → send to Telegram" — **no automated/scheduled signals**. Used to share analysis signals or P&L summaries on demand.
+
+### Config (`telegram_config` in the `config` table)
+```json
+{ "enabled": false, "bot_token": "", "chat_id": "" }
+```
+Set via **Settings → Telegram**. The bot token is write-only from the UI's
+perspective: `GET /telegram/config` returns `bot_token_set` + a masked hint,
+never the raw value. Saving with a blank token field keeps the stored token.
+
+### Send service ([`telegram_service.py`](backend/telegram_service.py))
+- `send_message(text, chat_id?)` → Bot API `POST /bot<token>/sendMessage` with `parse_mode=HTML`.
+- Reads token + chat id from the DB at send time (no restart needed on config change).
+- Long messages are split on line boundaries into ≤4000-char chunks (Telegram's hard cap is 4096).
+- Returns `{ok, error?}` — callers surface the error; nothing is auto-retried.
+
+### Message format (HTML text table)
+- **Scans** (`kind: "scans"`): one block per signal — `SYMBOL  signal-date`, then `Entry / SL / Risk`, then an outcome line with a 🟢/🔴/🟡/⚪ emoji. Footer: `N signal(s)`.
+- **Trades** (`kind: "trades"`): one block per trade — `SYMBOL  side`, `Qty / Entry / Exit-or-Now`, then `P&L (pct) · status` with 📈/📉. Footer: `Total P&L (N trade(s))`. Reuses the trades router's `_pnl()` so numbers match the table exactly.
+- All user content is HTML-escaped; `&` in labels is pre-escaped (`P&amp;L`).
+
+### Where the send buttons live (frontend)
+- [`AnalysisPage.tsx`](frontend/components/AnalysisPage.tsx) — Weekly + Monthly: a checkbox column + select-all in the header; "Send N to Telegram" button appears in the page header when ≥1 selected. Sends `kind:"scans"`.
+- [`DailyAnalysisPage.tsx`](frontend/components/DailyAnalysisPage.tsx) — Daily Patterns: same pattern (daily results are `scan_results` rows). Sends `kind:"scans"`.
+- [`trades/page.tsx`](frontend/app/dashboard/trades/page.tsx) — checkbox column + select-all; "Send N to Telegram" in the header. Sends `kind:"trades"`.
+
+### Setup (user-side, can't be automated)
+1. Telegram → `@BotFather` → `/newbot` → copy the **bot token**.
+2. Send any message to the new bot.
+3. Get your numeric **chat id** via `@userinfobot` (or a group's id if posting to a group the bot is in).
+4. Settings → Telegram → paste both → Save → **Send test**.
+
+### Gotchas
+- **No automated sending** — everything is user-initiated. The APScheduler EOW job has its own email/WhatsApp path; Telegram is deliberately not wired into it.
+- **Token never leaves the server in plaintext** after save — the config endpoint masks it. Treat it like any secret (it lives in the SQLite `config` table, which is gitignored / on the Fly volume).
+- Free + no card: Telegram Bot API needs no billing. Works from localhost or any host that can reach `api.telegram.org`.
 
 ---
 

@@ -1,0 +1,75 @@
+# ----------------------------------------------------------------------------
+# SECRETS — never commit
+# ----------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+*.token
+*tokens*.json
+*secret*
+*credential*
+*.pem
+*.key
+
+# ----------------------------------------------------------------------------
+# Personal / runtime data
+# ----------------------------------------------------------------------------
+fyers_data.db
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+data/
+screenshots/
+backtest_results.csv
+
+# Archived data + scripts (legacy parquet, old logs, old tokens)
+archive/
+
+# Logs
+*.log
+fyersApi.log
+fyersRequests.log
+
+# ----------------------------------------------------------------------------
+# Python
+# ----------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ----------------------------------------------------------------------------
+# Node / Next.js
+# ----------------------------------------------------------------------------
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ----------------------------------------------------------------------------
+# Editor / OS / scratch
+# ----------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+1.txt
+*.tmp
+*.bak
+
+# ----------------------------------------------------------------------------
+# Local Claude / agent state (don't share private chats)
+# ----------------------------------------------------------------------------
+.claude/

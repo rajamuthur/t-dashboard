@@ -115,7 +115,8 @@ export function calcSupertrend(candles: LiveCandle[], period = 10, mult = 3): Li
   const tr = trueRangeSeries(candles);
   const atr = wilder(tr, period);
   const out: LinePoint[] = [];
-  let prevUpper = 0, prevLower = 0, prevST = 0, prevTrendUp = true;
+  let prevUpper = 0, prevLower = 0, prevST = 0;
+  let prevTrendUp: boolean = true;
   for (let i = 0; i < candles.length; i++) {
     if (Number.isNaN(atr[i])) continue;
     const c = candles[i];
@@ -126,7 +127,7 @@ export function calcSupertrend(candles: LiveCandle[], period = 10, mult = 3): Li
       if (upperBand > prevUpper && candles[i - 1].close <= prevUpper) upperBand = prevUpper;
       if (lowerBand < prevLower && candles[i - 1].close >= prevLower) lowerBand = prevLower;
     }
-    let trendUp = prevTrendUp;
+    let trendUp: boolean = prevTrendUp;
     if (prevST !== 0) {
       if (prevTrendUp && c.close < prevLower) trendUp = false;
       else if (!prevTrendUp && c.close > prevUpper) trendUp = true;

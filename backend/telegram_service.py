@@ -62,6 +62,33 @@ async def send_message(text: str, chat_id: Optional[str] = None) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+async def send_photo(png: bytes, caption: str = "", chat_id: Optional[str] = None) -> dict:
+    """Send a PNG image to Telegram via sendPhoto (caption is HTML, max ~1024 chars)."""
+    cfg = await get_telegram_config()
+    token = (cfg.get("bot_token") or "").strip()
+    target = (chat_id or cfg.get("chat_id") or "").strip()
+    if not token:
+        return {"ok": False, "error": "Telegram bot token not configured"}
+    if not target:
+        return {"ok": False, "error": "Telegram chat id not configured"}
+
+    url = f"{TELEGRAM_API}/bot{token}/sendPhoto"
+    cap = caption if len(caption) <= 1024 else caption[:1020] + "…"
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                url,
+                data={"chat_id": target, "caption": cap, "parse_mode": "HTML"},
+                files={"photo": ("chart.png", png, "image/png")},
+            )
+            data = resp.json()
+            if not data.get("ok"):
+                return {"ok": False, "error": data.get("description", resp.text[:300])}
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def _split(text: str, limit: int) -> list[str]:
     """Split on line boundaries so HTML tags aren't cut mid-message."""
     if len(text) <= limit:

@@ -120,6 +120,8 @@ async def migrate_schema() -> None:
             ("sync_log",     "stocks_scanned","INTEGER NOT NULL DEFAULT 0"),
             ("sync_log",     "data_from",     "TEXT"),
             ("sync_log",     "data_to",       "TEXT"),
+            # Pattern scanner: sessions can be run per timeframe (day/week/month/...).
+            ("daily_scan_sessions", "timeframe", "TEXT NOT NULL DEFAULT 'day'"),
         ]:
             try:
                 await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")
@@ -185,6 +187,8 @@ async def _seed_default_config() -> None:
             "enabled": False,
             "bot_token": "",
             "chat_id": "",
+            "auto_send_patterns": False,    # auto-push freshly-formed patterns on scan
+            "auto_send_recency_days": 7,    # only auto-send patterns formed within N days
         },
         "nse_holidays": [],               # populated by POST /holidays/refresh
         "nse_holidays_updated": "",

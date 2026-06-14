@@ -5,7 +5,7 @@ import Link from "next/link";
 import { isLoggedIn, clearToken } from "@/lib/auth";
 import {
   LayoutDashboard, TrendingUp, Calendar,
-  CandlestickChart, Settings, LogOut, ChevronDown, BarChart2, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen,
+  CandlestickChart, Settings, LogOut, ChevronDown, BarChart2, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen, Shapes,
 } from "lucide-react";
 
 const ANALYSIS_ITEMS = [
@@ -19,6 +19,7 @@ const TOP_NAV = [
   { href: "/dashboard/analytics",    label: "Analytics",    icon: PieChart        },
   { href: "/dashboard/charts",       label: "Charts",       icon: CandlestickChart },
   { href: "/dashboard/live-charts",  label: "Live Charts",  icon: Radio },
+  { href: "/dashboard/patterns",     label: "Patterns",     icon: Shapes },
   { href: "/dashboard/trades",       label: "Trades & P&L", icon: BookOpen },
   { href: "/dashboard/holidays",     label: "Holidays",     icon: CalendarDays },
   { href: "/dashboard/health",       label: "Health",       icon: Heart },

@@ -93,6 +93,8 @@ export default function SettingsPage() {
   const [tgSaved,     setTgSaved]     = useState(false);
   const [tgTesting,   setTgTesting]   = useState(false);
   const [tgMsg,       setTgMsg]       = useState("");
+  const [tgAutoSend,  setTgAutoSend]  = useState(false);
+  const [tgRecency,   setTgRecency]   = useState("7");
 
   // ── F&O ───────────────────────────────────────────────────────────────────
   const [foCount,     setFoCount]     = useState<number | null>(null);
@@ -144,6 +146,8 @@ export default function SettingsPage() {
       setTgChatId(tg.chat_id);
       setTgTokenSet(tg.bot_token_set);
       setTgTokenHint(tg.bot_token_hint);
+      setTgAutoSend(tg.auto_send_patterns);
+      setTgRecency(String(tg.auto_send_recency_days ?? 7));
     }).catch(console.error);
   }, []);
 
@@ -189,6 +193,8 @@ export default function SettingsPage() {
       const res = await saveTelegramConfig({
         enabled: tgEnabled,
         chat_id: tgChatId.trim(),
+        auto_send_patterns: tgAutoSend,
+        auto_send_recency_days: Math.max(1, parseInt(tgRecency || "7", 10) || 7),
         // Only send the token if the user typed a new one; blank keeps the stored one.
         ...(tgToken.trim() ? { bot_token: tgToken.trim() } : {}),
       });
@@ -390,6 +396,25 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            {/* Auto-send freshly-formed patterns */}
+            <div className="border-t border-gray-800 pt-3 space-y-2">
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="tg-autosend" checked={tgAutoSend}
+                  onChange={e => setTgAutoSend(e.target.checked)}
+                  className="w-4 h-4 accent-brand-600 cursor-pointer" />
+                <label htmlFor="tg-autosend" className="text-sm text-gray-300 cursor-pointer">
+                  Auto-send newly-formed chart patterns when a scan runs
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label>Only patterns formed within the last</Label>
+                <input type="number" min={1} value={tgRecency}
+                  onChange={e => setTgRecency(e.target.value)}
+                  className="w-16 bg-gray-800 text-white text-sm rounded-lg px-2 py-1 border border-gray-700" />
+                <span className="text-xs text-gray-400">days (older historical matches are never auto-sent)</span>
+              </div>
+            </div>
+
             <div className="flex items-center gap-3">
               <SaveBtn onClick={saveTelegram} saving={tgSaving} saved={tgSaved} />
               <button
@@ -411,7 +436,8 @@ export default function SettingsPage() {
             )}
 
             <p className="text-xs text-gray-600">
-              Used by the "Send to Telegram" buttons on the Weekly / Monthly / Daily analysis pages and the Trades page.
+              Used by the "Send to Telegram" buttons on the analysis / trades / patterns pages, and (if enabled above)
+              auto-alerts when a pattern scan finds freshly-formed setups.
             </p>
           </Card>
         </div>

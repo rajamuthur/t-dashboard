@@ -27,12 +27,17 @@ export interface TelegramConfig {
   chat_id: string;
   bot_token_set: boolean;
   bot_token_hint: string;
+  auto_send_patterns: boolean;
+  auto_send_recency_days: number;
 }
 
 export const getTelegramConfig = () =>
   call<TelegramConfig>("/telegram/config");
 
-export const saveTelegramConfig = (body: { enabled: boolean; chat_id: string; bot_token?: string }) =>
+export const saveTelegramConfig = (body: {
+  enabled: boolean; chat_id: string; bot_token?: string;
+  auto_send_patterns?: boolean; auto_send_recency_days?: number;
+}) =>
   call<{ ok: boolean; enabled: boolean; chat_id: string; bot_token_set: boolean }>(
     "/telegram/config",
     { method: "PUT", body: JSON.stringify(body) },

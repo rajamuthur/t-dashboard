@@ -22,6 +22,8 @@ class TelegramConfig(BaseModel):
     enabled: bool = False
     bot_token: Optional[str] = None
     chat_id: Optional[str] = None
+    auto_send_patterns: Optional[bool] = None
+    auto_send_recency_days: Optional[int] = None
 
 
 @router.get("/config")
@@ -38,6 +40,8 @@ async def get_config(
         "chat_id": cfg.get("chat_id", ""),
         "bot_token_set": bool(token),
         "bot_token_hint": masked,
+        "auto_send_patterns": bool(cfg.get("auto_send_patterns", False)),
+        "auto_send_recency_days": int(cfg.get("auto_send_recency_days", 7)),
     }
 
 
@@ -55,6 +59,10 @@ async def set_config(
         "enabled": body.enabled,
         "bot_token": new_token,
         "chat_id": (body.chat_id if body.chat_id is not None else current.get("chat_id", "")),
+        "auto_send_patterns": (body.auto_send_patterns if body.auto_send_patterns is not None
+                               else current.get("auto_send_patterns", False)),
+        "auto_send_recency_days": (body.auto_send_recency_days if body.auto_send_recency_days is not None
+                                   else current.get("auto_send_recency_days", 7)),
     }
     await db.execute(
         "INSERT INTO config (key, value) VALUES ('telegram_config', ?) "
@@ -62,7 +70,10 @@ async def set_config(
         [json.dumps(merged)],
     )
     await db.commit()
-    return {"ok": True, "enabled": merged["enabled"], "chat_id": merged["chat_id"], "bot_token_set": bool(new_token)}
+    return {"ok": True, "enabled": merged["enabled"], "chat_id": merged["chat_id"],
+            "bot_token_set": bool(new_token),
+            "auto_send_patterns": merged["auto_send_patterns"],
+            "auto_send_recency_days": merged["auto_send_recency_days"]}
 
 
 @router.post("/test")

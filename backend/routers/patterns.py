@@ -11,6 +11,7 @@ from ..auth import get_current_user
 from ..db import get_db
 from ..pattern_scan_service import run_pattern_scan, get_pattern_scan_status
 from ..scanners.registry import PATTERN_ANALYSIS_TYPES, get_scanner
+from ..universe_service import get_universe_stocks, list_universes, UNIVERSES
 
 router = APIRouter(prefix="/patterns", tags=["patterns"])
 
@@ -25,6 +26,7 @@ PATTERN_LABELS = {
     "ascending_triangle": "Ascending Triangle",
     "descending_triangle": "Descending Triangle",
     "symmetrical_triangle": "Symmetrical Triangle",
+    "vcp": "VCP (Minervini)",
 }
 
 # Candles shown AFTER the pattern in the detail view.
@@ -46,19 +48,27 @@ async def types(_: str = Depends(get_current_user)):
     ]
 
 
+@router.get("/universes")
+async def universes(_: str = Depends(get_current_user)):
+    return await list_universes()
+
+
 @router.post("/run")
 async def run(
     background_tasks: BackgroundTasks,
     analysis_type: str = Query(...),
     timeframe: str = Query(default="day"),
+    universe: str = Query(default="fo"),
     _: str = Depends(get_current_user),
 ):
     if analysis_type not in PATTERN_ANALYSIS_TYPES:
         raise HTTPException(400, f"Unknown pattern: {analysis_type}")
     if timeframe not in TIMEFRAMES:
         raise HTTPException(400, f"Unsupported timeframe: {timeframe}")
-    background_tasks.add_task(run_pattern_scan, analysis_type, timeframe)
-    return {"status": "started", "analysis_type": analysis_type, "timeframe": timeframe}
+    if universe not in UNIVERSES:
+        raise HTTPException(400, f"Unknown universe: {universe}")
+    background_tasks.add_task(run_pattern_scan, analysis_type, timeframe, universe)
+    return {"status": "started", "analysis_type": analysis_type, "timeframe": timeframe, "universe": universe}
 
 
 @router.get("/status")
@@ -107,6 +117,19 @@ async def sessions(
     return [dict(r) for r in rows]
 
 
+async def _universe_filter(universe: Optional[str]) -> Optional[list[str]]:
+    """Resolve a universe key to its symbol list, or None for no filter.
+
+    'fo' is treated as no-filter (it's the full default set the scans already
+    cover), so the list isn't needlessly constrained when no narrower universe
+    is chosen.
+    """
+    if not universe or universe == "fo" or universe not in UNIVERSES:
+        return None
+    syms = await get_universe_stocks(universe)
+    return syms or None
+
+
 @router.get("")
 async def list_results(
     analysis_type: Optional[str] = None,
@@ -114,6 +137,7 @@ async def list_results(
     session_id: Optional[int] = None,
     symbol_filter: Optional[str] = None,
     outcome: Optional[str] = None,
+    universe: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     sort_by: str = Query(default="candle_date", regex="^(candle_date|symbol|outcome|analysis_type)$"),
@@ -131,6 +155,9 @@ async def list_results(
         # restrict to pattern scanners only
         qmarks = ",".join("?" * len(PATTERN_ANALYSIS_TYPES))
         filters.append(f"analysis_type IN ({qmarks})"); p.extend(sorted(PATTERN_ANALYSIS_TYPES))
+    uni_syms = await _universe_filter(universe)
+    if uni_syms is not None:
+        filters.append(f"symbol IN ({','.join('?' * len(uni_syms))})"); p.extend(uni_syms)
     if session_id is not None:
         filters.append("session_id=?"); p.append(session_id)
     if symbol_filter:
@@ -161,6 +188,7 @@ async def stats(
     analysis_type: Optional[str] = None,
     timeframe: str = Query(default="day"),
     symbol_filter: Optional[str] = None,
+    universe: Optional[str] = None,
     db: aiosqlite.Connection = Depends(get_db),
     _: str = Depends(get_current_user),
 ):
@@ -171,6 +199,9 @@ async def stats(
     else:
         qmarks = ",".join("?" * len(PATTERN_ANALYSIS_TYPES))
         filters.append(f"analysis_type IN ({qmarks})"); p.extend(sorted(PATTERN_ANALYSIS_TYPES))
+    uni_syms = await _universe_filter(universe)
+    if uni_syms is not None:
+        filters.append(f"symbol IN ({','.join('?' * len(uni_syms))})"); p.extend(uni_syms)
     if symbol_filter:
         filters.append("symbol LIKE ?"); p.append(f"%{symbol_filter.upper()}%")
     where = " AND ".join(filters)
@@ -194,7 +225,7 @@ async def stats(
     }
 
 
-async def _detail_payload(db: aiosqlite.Connection, scan_id: int) -> dict:
+async def _detail_payload(db: aiosqlite.Connection, scan_id: int, full: bool = False) -> dict:
     db.row_factory = aiosqlite.Row
     async with db.execute("SELECT * FROM scan_results WHERE id=?", [scan_id]) as cur:
         row = await cur.fetchone()
@@ -215,14 +246,19 @@ async def _detail_payload(db: aiosqlite.Connection, scan_id: int) -> dict:
     all_candles = [{"date": str(r["date"]), "open": r["open"], "high": r["high"],
                     "low": r["low"], "close": r["close"], "volume": r["volume"]} for r in rows]
 
-    end_idx = next((i for i, c in enumerate(all_candles) if c["date"] == signal["candle_date"]), len(all_candles) - 1)
-    # Show at least N candles (>= ~3 months for daily): pattern + leading history + trailing context.
-    min_total = max(window + _DETAIL_CONTEXT, _DETAIL_MIN_CANDLES.get(tf, _DETAIL_MIN_DEFAULT))
-    min_total = min(min_total, _DETAIL_MAX_CANDLES)
-    lead = min_total - _DETAIL_CONTEXT
-    lo = max(0, end_idx - lead + 1)
-    hi = min(len(all_candles), end_idx + _DETAIL_CONTEXT + 1)
-    candles = all_candles[lo:hi]
+    if full:
+        # Web detail: show ALL available history (the chart auto-fits; the user
+        # zooms to the pattern). Telegram PNGs use the focused window below.
+        candles = all_candles
+    else:
+        end_idx = next((i for i, c in enumerate(all_candles) if c["date"] == signal["candle_date"]), len(all_candles) - 1)
+        # Focused window (PNG): pattern + leading history + trailing context.
+        min_total = max(window + _DETAIL_CONTEXT, _DETAIL_MIN_CANDLES.get(tf, _DETAIL_MIN_DEFAULT))
+        min_total = min(min_total, _DETAIL_MAX_CANDLES)
+        lead = min_total - _DETAIL_CONTEXT
+        lo = max(0, end_idx - lead + 1)
+        hi = min(len(all_candles), end_idx + _DETAIL_CONTEXT + 1)
+        candles = all_candles[lo:hi]
 
     return {
         "signal": signal,
@@ -241,7 +277,7 @@ async def detail(
     db: aiosqlite.Connection = Depends(get_db),
     _: str = Depends(get_current_user),
 ):
-    return await _detail_payload(db, scan_id)
+    return await _detail_payload(db, scan_id, full=True)
 
 
 class SendChartsRequest(BaseModel):

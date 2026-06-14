@@ -44,6 +44,8 @@ def nse_to_yahoo(symbol: str) -> Optional[str]:
 # (yfinance has no native 4h). Intraday history is capped by Yahoo.
 _TF_YF = {
     "day":  ("1d", "5y"),
+    "week": ("1wk", "10y"),
+    "month": ("1mo", "max"),
     "5m":   ("5m", "60d"),
     "15m":  ("15m", "60d"),
     "30m":  ("30m", "60d"),

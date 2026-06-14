@@ -10,10 +10,11 @@ Heuristic + vectorised; slope/convergence/R^2/trend thresholds are tunable.
 import numpy as np
 import pandas as pd
 from .base import BaseScanner, ScanResult
+from ._trend import LEAD, trend_aligned
 
 TRIANGLE_LEN = 30          # candles forming the triangle
-TREND_LEN = 20             # lookback before the triangle (symmetrical bias)
-FLAT_TOL = 0.0010          # |norm slope| below this is "flat" (per-candle, /price)
+TREND_LEN = LEAD           # trend context before the triangle (>= ~1 month)
+FLAT_TOL = 0.0006          # |norm slope| below this is "flat" (per-candle, /price) — tightened so the flat side is genuinely flat
 TREND_TOL = 0.0015         # |norm slope| above this is clearly sloping (asc/desc)
 CONV_TOL = 0.0006          # milder slope floor for symmetrical convergence
 MIN_R2 = 0.20              # min fit quality on a sloping trendline (asc/desc)
@@ -34,6 +35,7 @@ def _detect(df: pd.DataFrame, want: str) -> ScanResult:
     if len(df) < TRIANGLE_LEN:
         return ScanResult(matched=False)
     tri = df.iloc[-TRIANGLE_LEN:]
+    lead = df.iloc[:-TRIANGLE_LEN]          # trend context before the triangle
     n = len(tri)
     highs = tri["high"].values.astype(float)
     lows = tri["low"].values.astype(float)
@@ -80,6 +82,10 @@ def _detect(df: pd.DataFrame, want: str) -> ScanResult:
         else:
             return ScanResult(matched=False)
     else:
+        return ScanResult(matched=False)
+
+    # Trade triangles only WITH the medium-term trend (breakout direction agrees).
+    if bull is None or not trend_aligned(lead, "bullish" if bull else "bearish"):
         return ScanResult(matched=False)
 
     resistance_end = sh * (n - 1) + ih
@@ -139,17 +145,17 @@ class _TriangleBase(BaseScanner):
 
 class AscendingTriangleScanner(_TriangleBase):
     analysis_type = "ascending_triangle"
-    window_size = TRIANGLE_LEN
+    window_size = TRIANGLE_LEN + LEAD        # triangle + trend context
     want = "ascending"
 
 
 class DescendingTriangleScanner(_TriangleBase):
     analysis_type = "descending_triangle"
-    window_size = TRIANGLE_LEN
+    window_size = TRIANGLE_LEN + LEAD        # triangle + trend context
     want = "descending"
 
 
 class SymmetricalTriangleScanner(_TriangleBase):
     analysis_type = "symmetrical_triangle"
-    window_size = TRIANGLE_LEN + TREND_LEN   # extra candles for the prior-trend bias
+    window_size = TRIANGLE_LEN + LEAD        # triangle + prior-trend bias / context
     want = "symmetrical"

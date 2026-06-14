@@ -1,5 +1,6 @@
 import pandas as pd
 from .base import BaseScanner, ScanResult
+from ._trend import LEAD, trend_aligned
 
 
 class EveningStarScanner(BaseScanner):
@@ -8,9 +9,12 @@ class EveningStarScanner(BaseScanner):
     C1: strong bullish (up) candle.
     C2: small-bodied 'star' at/above C1's close.
     C3: strong bearish candle closing back below the midpoint of C1's body.
+
+    Gated to a down-trend (via the leading context window): we only take evening
+    stars that are rallies/throwbacks inside a downtrend, not top-picking reversals.
     """
     analysis_type = "evening_star"
-    window_size = 3
+    window_size = 3 + LEAD          # 3-candle pattern + trend context
     direction = "bearish"
 
     marker_labels = ["C1", "C2", "C3"]
@@ -23,6 +27,9 @@ class EveningStarScanner(BaseScanner):
 
     def run(self, symbol: str, timeframe: str, df: pd.DataFrame) -> ScanResult:
         if len(df) < 3:
+            return ScanResult(matched=False)
+        # Trade only with the medium-term trend (sell rallies in a downtrend).
+        if not trend_aligned(df.iloc[:-3], "bearish"):
             return ScanResult(matched=False)
         c1, c2, c3 = df.iloc[-3], df.iloc[-2], df.iloc[-1]
 

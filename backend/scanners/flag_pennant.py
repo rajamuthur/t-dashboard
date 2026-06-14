@@ -11,8 +11,10 @@ positives; tighten POLE_MIN_MOVE_PCT / POLE_MIN_R2 to be stricter.
 import numpy as np
 import pandas as pd
 from .base import BaseScanner, ScanResult
+from ._trend import LEAD, trend_aligned
 
-POLE_FRAC = 0.4            # fraction of the window that is the pole
+PATTERN_LEN = 25          # pole + consolidation (the drawn pattern)
+POLE_FRAC = 0.4            # fraction of the pattern window that is the pole
 POLE_MIN_MOVE_PCT = 6.0    # min |% move| across the pole
 POLE_MIN_R2 = 0.55         # pole must be reasonably monotonic
 MAX_RETRACE = 0.5          # consolidation may retrace at most this fraction of the pole
@@ -40,7 +42,7 @@ def _slope_r2(y: np.ndarray):
 
 class FlagPennantScanner(BaseScanner):
     analysis_type = "flag_pennant"
-    window_size = 25  # ~10 pole + ~15 consolidation
+    window_size = PATTERN_LEN + LEAD  # pattern (~10 pole + ~15 cons) + trend context
 
     legend = [
         {"label": "Pole",    "color": "#a855f7", "text": "Sharp directional move"},
@@ -51,10 +53,11 @@ class FlagPennantScanner(BaseScanner):
     ]
 
     def run(self, symbol: str, timeframe: str, df: pd.DataFrame) -> ScanResult:
-        n = self.window_size
+        n = PATTERN_LEN
         if len(df) < n:
             return ScanResult(matched=False)
         w = df.iloc[-n:]
+        lead = df.iloc[:-n]              # trend context before the pattern
         pole_len = max(3, round(n * POLE_FRAC))
         pole = w.iloc[:pole_len]
         cons = w.iloc[pole_len:]
@@ -71,6 +74,9 @@ class FlagPennantScanner(BaseScanner):
             return ScanResult(matched=False)
 
         bull = move_pct > 0
+        # Only continuation WITH the medium-term trend (pole agrees with trend).
+        if not trend_aligned(lead, "bullish" if bull else "bearish"):
+            return ScanResult(matched=False)
         pole_low = float(pole["low"].min())
         pole_high = float(pole["high"].max())
         pole_height = pole_high - pole_low

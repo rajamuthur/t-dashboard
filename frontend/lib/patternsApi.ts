@@ -27,6 +27,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<{ data: T;
 export type Timeframe = "day" | "week" | "month" | "5m" | "15m" | "30m" | "1h" | "4h";
 
 export interface PatternType { key: string; label: string; window: number; }
+export interface Universe { key: string; label: string; count: number; }
 
 export interface PatternRow {
   id: number;
@@ -63,15 +64,18 @@ export interface ScanStatus {
 export const getPatternTypes = () =>
   call<PatternType[]>("/patterns/types").then(r => r.data);
 
-export const runPatternScan = (analysisType: string, timeframe: Timeframe) =>
-  call<{ status: string }>(`/patterns/run?analysis_type=${analysisType}&timeframe=${timeframe}`, { method: "POST" }).then(r => r.data);
+export const getUniverses = () =>
+  call<Universe[]>("/patterns/universes").then(r => r.data);
+
+export const runPatternScan = (analysisType: string, timeframe: Timeframe, universe = "fo") =>
+  call<{ status: string }>(`/patterns/run?analysis_type=${analysisType}&timeframe=${timeframe}&universe=${universe}`, { method: "POST" }).then(r => r.data);
 
 export const getPatternScanStatus = () =>
   call<ScanStatus>("/patterns/status").then(r => r.data);
 
 export const listPatterns = (params: {
   analysis_type?: string; timeframe: Timeframe; outcome?: string; symbol_filter?: string;
-  sort_by?: string; sort_dir?: "asc" | "desc"; limit?: number; offset?: number;
+  universe?: string; sort_by?: string; sort_dir?: "asc" | "desc"; limit?: number; offset?: number;
 }) => {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== "") q.set(k, String(v)); });
@@ -82,7 +86,7 @@ export interface PatternStats {
   success: number; failure: number; open: number; no_trade: number;
   total: number; win_rate: number | null;
 }
-export const getPatternStats = (params: { analysis_type?: string; timeframe: Timeframe; symbol_filter?: string }) => {
+export const getPatternStats = (params: { analysis_type?: string; timeframe: Timeframe; symbol_filter?: string; universe?: string }) => {
   const q = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== "") q.set(k, String(v)); });
   return call<PatternStats>(`/patterns/stats?${q.toString()}`).then(r => r.data);

@@ -1,5 +1,6 @@
 import pandas as pd
 from .base import BaseScanner, ScanResult
+from ._trend import LEAD, trend_aligned
 
 
 class MorningStarScanner(BaseScanner):
@@ -8,9 +9,12 @@ class MorningStarScanner(BaseScanner):
     C1: strong bearish (down) candle.
     C2: small-bodied 'star' (indecision), gapping/closing below C1's body.
     C3: strong bullish candle that closes back above the midpoint of C1's body.
+
+    Gated to an up-trend (via the leading context window): we only take morning
+    stars that are dips/throwbacks inside an uptrend, not bottom-fishing reversals.
     """
     analysis_type = "morning_star"
-    window_size = 3
+    window_size = 3 + LEAD          # 3-candle pattern + trend context
     direction = "bullish"
 
     marker_labels = ["C1", "C2", "C3"]
@@ -23,6 +27,9 @@ class MorningStarScanner(BaseScanner):
 
     def run(self, symbol: str, timeframe: str, df: pd.DataFrame) -> ScanResult:
         if len(df) < 3:
+            return ScanResult(matched=False)
+        # Trade only with the medium-term trend (buy dips in an uptrend).
+        if not trend_aligned(df.iloc[:-3], "bullish"):
             return ScanResult(matched=False)
         c1, c2, c3 = df.iloc[-3], df.iloc[-2], df.iloc[-1]
 

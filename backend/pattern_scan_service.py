@@ -18,7 +18,7 @@ import aiosqlite
 import pandas as pd
 
 from .db import _get_db_path
-from .fno_service import get_fo_stocks
+from .universe_service import get_universe_stocks
 from .scanners.registry import get_scanner, PATTERN_ANALYSIS_TYPES
 from .telegram_service import get_telegram_config, send_message
 
@@ -34,6 +34,7 @@ _PATTERN_LABELS = {
     "ascending_triangle": "Ascending Triangle",
     "descending_triangle": "Descending Triangle",
     "symmetrical_triangle": "Symmetrical Triangle",
+    "vcp": "VCP (Minervini)",
 }
 
 
@@ -130,7 +131,7 @@ def _dedup_overlaps(occurrences, date_to_pos: dict, min_gap: int):
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
-async def run_pattern_scan(analysis_type: str, timeframe: str = "day") -> dict:
+async def run_pattern_scan(analysis_type: str, timeframe: str = "day", universe: str = "fo") -> dict:
     global _status
     if analysis_type not in PATTERN_ANALYSIS_TYPES:
         raise ValueError(f"Not a pattern scanner: {analysis_type!r}")
@@ -139,7 +140,7 @@ async def run_pattern_scan(analysis_type: str, timeframe: str = "day") -> dict:
     started_at = datetime.now(timezone.utc).isoformat()
     scan_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     _status = {"status": "running", "step": "Starting...", "matched": 0, "total": 0,
-               "analysis_type": analysis_type, "timeframe": timeframe}
+               "analysis_type": analysis_type, "timeframe": timeframe, "universe": universe}
 
     async with aiosqlite.connect(db_path) as db:
         cur = await db.execute(
@@ -151,8 +152,8 @@ async def run_pattern_scan(analysis_type: str, timeframe: str = "day") -> dict:
         await db.commit()
 
     try:
-        stocks = await get_fo_stocks()
-        _status.update({"step": f"Scanning {len(stocks)} stocks ({timeframe})...", "total": len(stocks)})
+        stocks = await get_universe_stocks(universe)
+        _status.update({"step": f"Scanning {len(stocks)} stocks ({timeframe}, {universe})...", "total": len(stocks)})
         async with aiosqlite.connect(db_path) as db:
             await db.execute("UPDATE daily_scan_sessions SET total_stocks=? WHERE id=?",
                              [len(stocks), session_id])

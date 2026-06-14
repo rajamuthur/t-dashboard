@@ -10,6 +10,7 @@ from .cup_and_handle import CupHandleScanner
 from .triangle import (
     AscendingTriangleScanner, DescendingTriangleScanner, SymmetricalTriangleScanner,
 )
+from .vcp import VCPScanner
 
 _REGISTRY: Dict[str, Type[BaseScanner]] = {
     ThreeCandleReversalScanner.analysis_type:   ThreeCandleReversalScanner,
@@ -22,6 +23,7 @@ _REGISTRY: Dict[str, Type[BaseScanner]] = {
     AscendingTriangleScanner.analysis_type:     AscendingTriangleScanner,
     DescendingTriangleScanner.analysis_type:    DescendingTriangleScanner,
     SymmetricalTriangleScanner.analysis_type:   SymmetricalTriangleScanner,
+    VCPScanner.analysis_type:                   VCPScanner,
 }
 
 # Daily-only scanners — shown under Daily Patterns, not Weekly/Monthly
@@ -36,6 +38,7 @@ PATTERN_ANALYSIS_TYPES = {
     AscendingTriangleScanner.analysis_type,
     DescendingTriangleScanner.analysis_type,
     SymmetricalTriangleScanner.analysis_type,
+    VCPScanner.analysis_type,
 }
 
 

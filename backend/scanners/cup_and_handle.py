@@ -11,7 +11,9 @@ positives (this is the loosest of the patterns). Needs deep daily history.
 import numpy as np
 import pandas as pd
 from .base import BaseScanner, ScanResult
+from ._trend import LEAD, trend_aligned
 
+CUP_LEN = 80              # cup + handle (the drawn pattern)
 RIM_TOL = 0.08            # left/right rims within this fraction of each other
 MIN_DEPTH = 0.10          # cup depth as fraction of rim (>= shallow floor)
 MAX_DEPTH = 0.50          # ...and <= this (a cup, not a crater)
@@ -22,7 +24,7 @@ BOTTOM_CENTER = (0.25, 0.75)  # rounded-bottom must sit in the middle
 
 class CupHandleScanner(BaseScanner):
     analysis_type = "cup_handle"
-    window_size = 80          # ~4 months of daily candles
+    window_size = CUP_LEN + LEAD   # cup (~4 months) + trend context
     direction = "bullish"
 
     legend = [
@@ -34,8 +36,11 @@ class CupHandleScanner(BaseScanner):
     ]
 
     def run(self, symbol: str, timeframe: str, df: pd.DataFrame) -> ScanResult:
-        n = self.window_size
+        n = CUP_LEN
         if len(df) < 40:
+            return ScanResult(matched=False)
+        # Cup & handle is a continuation — require a prior up-trend into the cup.
+        if not trend_aligned(df.iloc[:-n] if len(df) > n else df.iloc[:0], "bullish"):
             return ScanResult(matched=False)
         w = df.iloc[-n:] if len(df) >= n else df
         m = len(w)

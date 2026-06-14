@@ -7,6 +7,9 @@ from .morning_star import MorningStarScanner
 from .evening_star import EveningStarScanner
 from .flag_pennant import FlagPennantScanner
 from .cup_and_handle import CupHandleScanner
+from .triangle import (
+    AscendingTriangleScanner, DescendingTriangleScanner, SymmetricalTriangleScanner,
+)
 
 _REGISTRY: Dict[str, Type[BaseScanner]] = {
     ThreeCandleReversalScanner.analysis_type:   ThreeCandleReversalScanner,
@@ -16,6 +19,9 @@ _REGISTRY: Dict[str, Type[BaseScanner]] = {
     EveningStarScanner.analysis_type:           EveningStarScanner,
     FlagPennantScanner.analysis_type:           FlagPennantScanner,
     CupHandleScanner.analysis_type:             CupHandleScanner,
+    AscendingTriangleScanner.analysis_type:     AscendingTriangleScanner,
+    DescendingTriangleScanner.analysis_type:    DescendingTriangleScanner,
+    SymmetricalTriangleScanner.analysis_type:   SymmetricalTriangleScanner,
 }
 
 # Daily-only scanners — shown under Daily Patterns, not Weekly/Monthly
@@ -27,6 +33,9 @@ PATTERN_ANALYSIS_TYPES = {
     EveningStarScanner.analysis_type,
     FlagPennantScanner.analysis_type,
     CupHandleScanner.analysis_type,
+    AscendingTriangleScanner.analysis_type,
+    DescendingTriangleScanner.analysis_type,
+    SymmetricalTriangleScanner.analysis_type,
 }
 
 

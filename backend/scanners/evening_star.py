@@ -51,7 +51,7 @@ class EveningStarScanner(BaseScanner):
         target = round(entry - 1.5 * risk, 2)
         entry, stop = round(entry, 2), round(stop, 2)
 
-        d1, d2, d3 = (str(df.index[-3])[:10], str(df.index[-2])[:10], str(df.index[-1])[:10])
+        d1, d2, d3 = (str(df.index[-3]), str(df.index[-2]), str(df.index[-1]))
         details = {
             "direction": "bearish",
             "entry_mode": "immediate",

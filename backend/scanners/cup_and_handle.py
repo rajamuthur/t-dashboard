@@ -83,11 +83,11 @@ class CupHandleScanner(BaseScanner):
         if entry - stop <= 0:
             return ScanResult(matched=False)
 
-        left_date = str(cup.index[int(ch[:edge].argmax())])[:10]
-        bottom_date = str(cup.index[bottom_idx])[:10]
-        right_date = str(cup.index[len(ch) - edge + int(ch[-edge:].argmax())])[:10]
-        handle_lo_date = str(handle.index[int(handle["low"].values.argmin())])[:10]
-        end_date = str(w.index[-1])[:10]
+        left_date = str(cup.index[int(ch[:edge].argmax())])
+        bottom_date = str(cup.index[bottom_idx])
+        right_date = str(cup.index[len(ch) - edge + int(ch[-edge:].argmax())])
+        handle_lo_date = str(handle.index[int(handle["low"].values.argmin())])
+        end_date = str(w.index[-1])
 
         details = {
             "direction": "bullish",

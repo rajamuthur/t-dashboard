@@ -73,3 +73,7 @@ Thumbs.db
 # Local Claude / agent state (don't share private chats)
 # ----------------------------------------------------------------------------
 .claude/
+
+# Reference PDFs / books (large, copyrighted — keep local)
+books/
+*.pdf

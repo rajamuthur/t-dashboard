@@ -24,7 +24,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<{ data: T;
   return { data, total };
 }
 
-export type Timeframe = "day" | "week" | "month";
+export type Timeframe = "day" | "week" | "month" | "5m" | "15m" | "30m" | "1h" | "4h";
 
 export interface PatternType { key: string; label: string; window: number; }
 

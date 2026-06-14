@@ -9,7 +9,7 @@ import {
 } from "@/lib/patternsApi";
 import { fmtIsoDate } from "@/lib/dates";
 
-const TIMEFRAMES: Timeframe[] = ["day", "week", "month"];
+const TIMEFRAMES: Timeframe[] = ["5m", "15m", "30m", "1h", "4h", "day", "week", "month"];
 const POLL_MS = 2500;
 
 function pnlColor(p: number | null | undefined) {
@@ -82,6 +82,13 @@ export default function PatternsPage() {
   }, [analysisType, timeframe, outcomeFilter, symbolFilter, sortBy, sortDir]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Reset selection + open detail when the view changes, so a stale selection
+  // from a previous pattern/timeframe can't be sent (wrong-chart bug).
+  useEffect(() => {
+    setSelected(new Set());
+    setExpandedId(null);
+  }, [analysisType, timeframe, outcomeFilter, symbolFilter]);
 
   async function runScan() {
     if (!analysisType) { setMsg("Pick a specific pattern to scan."); return; }

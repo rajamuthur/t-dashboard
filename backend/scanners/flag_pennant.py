@@ -132,10 +132,10 @@ class FlagPennantScanner(BaseScanner):
         entry, stop, target = round(entry, 2), round(stop, 2), round(target, 2)
 
         # Geometry for drawing.
-        pole_start_date = str(pole.index[0])[:10]
-        pole_end_date = str(pole.index[-1])[:10]
-        cons_start_date = str(cons.index[0])[:10]
-        cons_end_date = str(cons.index[-1])[:10]
+        pole_start_date = str(pole.index[0])
+        pole_end_date = str(pole.index[-1])
+        cons_start_date = str(cons.index[0])
+        cons_end_date = str(cons.index[-1])
         # Channel trendline endpoint values from the linear fits.
         hi0 = float(highs[0]); hi1 = float(slope_high * (len(highs) - 1) + highs[0])
         lo0 = float(lows[0]);  lo1 = float(slope_low * (len(lows) - 1) + lows[0])

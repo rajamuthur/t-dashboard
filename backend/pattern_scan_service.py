@@ -31,6 +31,9 @@ _PATTERN_LABELS = {
     "evening_star": "Evening Star",
     "flag_pennant": "Flag / Pennant",
     "cup_handle": "Cup & Handle",
+    "ascending_triangle": "Ascending Triangle",
+    "descending_triangle": "Descending Triangle",
+    "symmetrical_triangle": "Symmetrical Triangle",
 }
 
 
@@ -155,10 +158,14 @@ async def run_pattern_scan(analysis_type: str, timeframe: str = "day") -> dict:
                              [len(stocks), session_id])
             await db.commit()
 
-        # For daily, refresh recent candles so 'latest' detections are current.
-        # Weekly/monthly candles are maintained by the existing sync flow; read as-is.
+        # Daily: top up recent candles. Intraday: fetch the available yfinance window.
+        # Weekly/monthly: read existing candles as-is.
         if timeframe == "day":
             await _sync_recent_daily(stocks, db_path)
+        elif timeframe in ("5m", "15m", "30m", "1h", "4h"):
+            from .daily_backfill import backfill_timeframe
+            _status["step"] = f"Fetching {timeframe} candles (yfinance)..."
+            await asyncio.to_thread(backfill_timeframe, db_path, stocks, timeframe, _status)
 
         scanner = get_scanner(analysis_type)
         matched, inserted = await _scan_all(scanner, stocks, analysis_type, timeframe, session_id, db_path)
@@ -215,7 +222,7 @@ async def _scan_all(scanner, stocks, analysis_type, timeframe, session_id, db_pa
 
             df = pd.DataFrame(list(rows),
                               columns=["date", "open", "high", "low", "close", "volume"]).set_index("date")
-            date_to_pos = {str(d)[:10]: i for i, d in enumerate(df.index)}
+            date_to_pos = {str(d): i for i, d in enumerate(df.index)}
 
             occurrences = await asyncio.to_thread(scanner.scan_history, symbol, timeframe, df)
             occurrences = _dedup_overlaps(occurrences, date_to_pos, min_gap)

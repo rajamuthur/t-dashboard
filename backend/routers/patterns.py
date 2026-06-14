@@ -14,17 +14,26 @@ from ..scanners.registry import PATTERN_ANALYSIS_TYPES, get_scanner
 
 router = APIRouter(prefix="/patterns", tags=["patterns"])
 
-TIMEFRAMES = {"day", "week", "month"}  # Phase 1: stored EOD timeframes
+TIMEFRAMES = {"day", "week", "month", "5m", "15m", "30m", "1h", "4h"}
+INTRADAY_TIMEFRAMES = {"5m", "15m", "30m", "1h", "4h"}
 
 PATTERN_LABELS = {
     "morning_star": "Morning Star",
     "evening_star": "Evening Star",
     "flag_pennant": "Flag / Pennant",
     "cup_handle": "Cup & Handle",
+    "ascending_triangle": "Ascending Triangle",
+    "descending_triangle": "Descending Triangle",
+    "symmetrical_triangle": "Symmetrical Triangle",
 }
 
-# Candle context to show around a pattern in the detail view, per scanner window.
+# Candles shown AFTER the pattern in the detail view.
 _DETAIL_CONTEXT = 15
+# Minimum candles shown in the detail chart, per timeframe (>= ~3 months for daily).
+_DETAIL_MIN_CANDLES = {"day": 90, "week": 90, "month": 48,
+                       "5m": 150, "15m": 150, "30m": 150, "1h": 150, "4h": 130}
+_DETAIL_MIN_DEFAULT = 80
+_DETAIL_MAX_CANDLES = 320
 # Max charts pushed in a single "send to Telegram" action (rendering is CPU-bound).
 _CHART_SEND_CAP = 10
 
@@ -203,11 +212,15 @@ async def _detail_payload(db: aiosqlite.Connection, scan_id: int) -> dict:
         [signal["symbol"], tf],
     ) as cur:
         rows = await cur.fetchall()
-    all_candles = [{"date": str(r["date"])[:10], "open": r["open"], "high": r["high"],
+    all_candles = [{"date": str(r["date"]), "open": r["open"], "high": r["high"],
                     "low": r["low"], "close": r["close"], "volume": r["volume"]} for r in rows]
 
     end_idx = next((i for i, c in enumerate(all_candles) if c["date"] == signal["candle_date"]), len(all_candles) - 1)
-    lo = max(0, end_idx - window - _DETAIL_CONTEXT + 1)
+    # Show at least N candles (>= ~3 months for daily): pattern + leading history + trailing context.
+    min_total = max(window + _DETAIL_CONTEXT, _DETAIL_MIN_CANDLES.get(tf, _DETAIL_MIN_DEFAULT))
+    min_total = min(min_total, _DETAIL_MAX_CANDLES)
+    lead = min_total - _DETAIL_CONTEXT
+    lo = max(0, end_idx - lead + 1)
     hi = min(len(all_candles), end_idx + _DETAIL_CONTEXT + 1)
     candles = all_candles[lo:hi]
 

@@ -18,15 +18,16 @@ from .base import BaseScanner, ScanResult
 from ._trend import LEAD, trend_aligned
 from ._pivots import swing_pivots, fit_line
 
-FLAT_TOL = 0.0006          # |norm slope| below this is "flat" (per-candle, /price)
+FLAT_TOL = 0.0011          # |norm slope| below this is "flat" (per-candle, /price); sized so 3-month flat sides still qualify (a real multi-month flat top is never perfectly level)
 TREND_TOL = 0.0015         # |norm slope| above this is clearly sloping (asc/desc)
-CONV_TOL = 0.0006          # slope floor for symmetrical convergence
+CONV_TOL = 0.0003          # slope floor for symmetrical convergence (gentle over a multi-month window; range-compression is the primary gate)
 MIN_R2 = 0.20              # min fit quality on a sloping trendline (asc/desc)
 COMPRESSION = 0.80         # late range must be <= this fraction of early range (narrowing)
 TREND_MIN_PCT = 4.0        # prior move % to call a symmetrical bull/bear
 PIVOT_K = 3                # fractal swing strength for drawn lines + consistency gate
 PIVOT_FLAT = 0.0016        # |norm pivot-slope| below this is "flat" (2-pt pivot slopes are noisier)
-PIVOT_SLOPE = 0.0004       # |norm pivot-slope| above this is "clearly sloping"
+PIVOT_SLOPE = 0.0004       # |norm pivot-slope| above this is "clearly sloping" (asc/desc)
+SYM_PIVOT_SLOPE = 0.0002   # gentler convergence floor for symmetrical (wide multi-month triangles converge slowly)
 
 
 def _fit(y: np.ndarray):
@@ -120,8 +121,8 @@ def _detect(df: pd.DataFrame, want: str, timeframe: str, formation: int) -> Scan
         ok = abs(nrs) < PIVOT_FLAT and nps > PIVOT_SLOPE
     elif want == "descending":
         ok = nrs < -PIVOT_SLOPE and abs(nps) < PIVOT_FLAT
-    else:  # symmetrical
-        ok = nrs < -PIVOT_SLOPE and nps > PIVOT_SLOPE
+    else:  # symmetrical — converges gently over a multi-month base
+        ok = nrs < -SYM_PIVOT_SLOPE and nps > SYM_PIVOT_SLOPE
     if not ok:
         return ScanResult(matched=False)
 

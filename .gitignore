@@ -19,6 +19,10 @@ fyers_data.db
 *.sqlite
 *.sqlite3
 *.sqlite-journal
+*.db-journal
+*-journal
+*.db-wal
+*.db-shm
 data/
 screenshots/
 backtest_results.csv

@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from .base import BaseScanner, ScanResult
 from ._trend import LEAD, trend_aligned
+from ._pivots import swing_pivots
 
 CUP_LEN = 80              # cup + handle (the drawn pattern)
 RIM_TOL = 0.08            # left/right rims within this fraction of each other
@@ -88,11 +89,20 @@ class CupHandleScanner(BaseScanner):
         if entry - stop <= 0:
             return ScanResult(matched=False)
 
-        left_date = str(cup.index[int(ch[:edge].argmax())])
-        bottom_date = str(cup.index[bottom_idx])
-        right_date = str(cup.index[len(ch) - edge + int(ch[-edge:].argmax())])
+        left_idx = int(ch[:edge].argmax())
+        right_idx = len(ch) - edge + int(ch[-edge:].argmax())
         handle_lo_date = str(handle.index[int(handle["low"].values.argmin())])
         end_date = str(w.index[-1])
+
+        # Trace the rounded cup through the REAL swing lows (a smooth U), not a
+        # sharp 3-point V. Left rim -> intervening swing lows -> bottom -> right rim.
+        _, cup_lows = swing_pivots(cup, k=3)
+        u_pts = {left_idx: left_rim, right_idx: right_rim, bottom_idx: bottom}
+        for idx, price in cup_lows:
+            if left_idx < idx < right_idx:
+                u_pts[idx] = price
+        cup_points = [{"date": str(cup.index[i]), "price": round(p, 2)}
+                      for i, p in sorted(u_pts.items())]
 
         details = {
             "direction": "bullish",
@@ -103,10 +113,7 @@ class CupHandleScanner(BaseScanner):
             "stop_loss": stop,
             "target": target,
             "shapes": [
-                {"type": "polyline", "color": "#a855f7", "label": "Cup",
-                 "points": [{"date": left_date, "price": round(left_rim, 2)},
-                            {"date": bottom_date, "price": round(bottom, 2)},
-                            {"date": right_date, "price": round(right_rim, 2)}]},
+                {"type": "polyline", "color": "#a855f7", "label": "Cup", "points": cup_points},
                 {"type": "marker", "date": handle_lo_date, "price": hl, "color": "#f59e0b",
                  "text": "Handle", "position": "belowBar"},
                 {"type": "hline", "price": entry, "color": "#22c55e", "label": "Entry (rim)"},

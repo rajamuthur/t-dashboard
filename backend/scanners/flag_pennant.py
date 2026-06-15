@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 from .base import BaseScanner, ScanResult
 from ._trend import LEAD, trend_aligned
+from ._pivots import swing_pivots
 
 PATTERN_LEN = 25          # pole + consolidation (the drawn pattern)
 POLE_FRAC = 0.4            # fraction of the pattern window that is the pole
@@ -142,9 +143,24 @@ class FlagPennantScanner(BaseScanner):
         pole_end_date = str(pole.index[-1])
         cons_start_date = str(cons.index[0])
         cons_end_date = str(cons.index[-1])
-        # Channel trendline endpoint values from the linear fits.
-        hi0 = float(highs[0]); hi1 = float(slope_high * (len(highs) - 1) + highs[0])
-        lo0 = float(lows[0]);  lo1 = float(slope_low * (len(lows) - 1) + lows[0])
+        # Channel lines anchored to REAL swing highs/lows of the consolidation
+        # (not regression endpoints), so they ride the actual touches. Fall back
+        # to the linear-fit endpoints when the pause is too short for >=2 pivots.
+        cons_dates = [str(d) for d in cons.index]
+        csh, csl = swing_pivots(cons, k=2)
+        hi_fit0 = float(slope_high * 0 + highs[0]); hi_fit1 = float(slope_high * (len(highs) - 1) + highs[0])
+        lo_fit0 = float(slope_low * 0 + lows[0]);   lo_fit1 = float(slope_low * (len(lows) - 1) + lows[0])
+
+        def _chan(pivots, fb0_date, fb0, fb1_date, fb1):
+            if len(pivots) >= 2:
+                (i0, p0), (i1, p1) = pivots[0], pivots[-1]
+                return [{"date": cons_dates[i0], "price": round(p0, 2)},
+                        {"date": cons_dates[i1], "price": round(p1, 2)}]
+            return [{"date": fb0_date, "price": round(fb0, 2)},
+                    {"date": fb1_date, "price": round(fb1, 2)}]
+
+        chan_high_pts = _chan(csh, cons_start_date, hi_fit0, cons_end_date, hi_fit1)
+        chan_low_pts = _chan(csl, cons_start_date, lo_fit0, cons_end_date, lo_fit1)
 
         details = {
             "direction": "bullish" if bull else "bearish",
@@ -162,12 +178,8 @@ class FlagPennantScanner(BaseScanner):
                 {"type": "trendline", "color": "#a855f7", "label": "Pole",
                  "points": [{"date": pole_start_date, "price": round(float(p_start), 2)},
                             {"date": pole_end_date,   "price": round(float(p_end), 2)}]},
-                {"type": "trendline", "color": "#f59e0b", "label": "Channel high",
-                 "points": [{"date": cons_start_date, "price": round(hi0, 2)},
-                            {"date": cons_end_date,   "price": round(hi1, 2)}]},
-                {"type": "trendline", "color": "#f59e0b", "label": "Channel low",
-                 "points": [{"date": cons_start_date, "price": round(lo0, 2)},
-                            {"date": cons_end_date,   "price": round(lo1, 2)}]},
+                {"type": "trendline", "color": "#f59e0b", "label": "Channel high", "points": chan_high_pts},
+                {"type": "trendline", "color": "#f59e0b", "label": "Channel low", "points": chan_low_pts},
                 {"type": "hline", "price": entry,  "color": "#22c55e", "label": "Entry"},
                 {"type": "hline", "price": stop,   "color": "#ef4444", "label": "Stop"},
                 {"type": "hline", "price": target, "color": "#3b82f6", "label": "Target"},

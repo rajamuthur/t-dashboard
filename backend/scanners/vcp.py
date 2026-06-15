@@ -43,7 +43,8 @@ SLOPE_LB = {"day": 22, "week": 4, "month": 2}
 # 52-week high/low window in candles.
 RANGE_LEN = {"day": 252, "week": 52, "month": 12}
 # Recent region that holds the contraction base.
-BASE_LEN = {"day": 65, "week": 26, "month": 10}
+# VCP base region length now comes from min_months (duration_candles); the
+# Trend-Template MA/52-week history below still gates the earliest scannable index.
 # Zigzag reversal threshold — must be small enough to catch a ~3-5% final T.
 REVERSAL = {"day": 0.04, "week": 0.05, "month": 0.06}
 
@@ -149,8 +150,14 @@ class VCPScanner(BaseScanner):
             piv.append((lo_i, float(lo), "L"))
         return piv
 
+    def window_for(self, timeframe: str) -> int:
+        s, m, l = TREND_MA.get(timeframe, TREND_MA["day"])
+        rng = RANGE_LEN.get(timeframe, RANGE_LEN["day"])
+        slope_lb = SLOPE_LB.get(timeframe, SLOPE_LB["day"])
+        return max(l + slope_lb, rng, self.duration_candles(timeframe))
+
     def _detect_at(self, df: pd.DataFrame, i: int, timeframe: str, ind: dict) -> ScanResult:
-        base_len = BASE_LEN.get(timeframe, BASE_LEN["day"])
+        base_len = self.duration_candles(timeframe)
         if i < base_len:
             return ScanResult(matched=False)
         # 1) Stage-2 / Trend Template gate (hard).
@@ -276,7 +283,7 @@ class VCPScanner(BaseScanner):
     # ------------------------------------------------------------------ #
     def run(self, symbol: str, timeframe: str, df: pd.DataFrame) -> ScanResult:
         """Live single signal: evaluate the most recent candle."""
-        if len(df) < BASE_LEN.get(timeframe, BASE_LEN["day"]):
+        if len(df) < self.duration_candles(timeframe):
             return ScanResult(matched=False)
         ind = self._indicators(df, timeframe)
         return self._detect_at(df, len(df) - 1, timeframe, ind)
@@ -290,7 +297,7 @@ class VCPScanner(BaseScanner):
         s, m, l = TREND_MA.get(timeframe, TREND_MA["day"])
         rng = RANGE_LEN.get(timeframe, RANGE_LEN["day"])
         slope_lb = SLOPE_LB.get(timeframe, SLOPE_LB["day"])
-        base_len = BASE_LEN.get(timeframe, BASE_LEN["day"])
+        base_len = self.duration_candles(timeframe)
         # Earliest index where every gate has enough history.
         start = max(l + slope_lb, rng, base_len)
         for i in range(start, len(df)):

@@ -14,18 +14,17 @@ from .base import BaseScanner, ScanResult
 from ._trend import LEAD, trend_aligned
 from ._pivots import swing_pivots
 
-CUP_LEN = 80              # cup + handle (the drawn pattern)
 RIM_TOL = 0.08            # left/right rims within this fraction of each other
 MIN_DEPTH = 0.10          # cup depth as fraction of rim (>= shallow floor)
 MAX_DEPTH = 0.50          # ...and <= this (a cup, not a crater)
 HANDLE_FRAC = 0.18        # handle = last this fraction of the window
 HANDLE_MAX_DEPTH = 0.5    # handle range <= this fraction of cup depth
+HANDLE_MAX_RETRACE = 0.35 # handle low may retrace at most this fraction of the cup depth from the rim (a SHALLOW pullback)
 BOTTOM_CENTER = (0.25, 0.75)  # rounded-bottom must sit in the middle
 
 
 class CupHandleScanner(BaseScanner):
     analysis_type = "cup_handle"
-    window_size = CUP_LEN + LEAD   # cup (~4 months) + trend context
     direction = "bullish"
 
     legend = [
@@ -36,14 +35,18 @@ class CupHandleScanner(BaseScanner):
         {"label": "Target", "color": "#3b82f6", "text": "Rim + cup depth"},
     ]
 
+    def window_for(self, timeframe: str) -> int:
+        # Cup FORMS over >= min_months, plus trend context.
+        return self.duration_candles(timeframe) + LEAD
+
     def run(self, symbol: str, timeframe: str, df: pd.DataFrame) -> ScanResult:
-        n = CUP_LEN
-        if len(df) < 40:
+        n = self.duration_candles(timeframe)
+        if len(df) < n:
             return ScanResult(matched=False)
         # Cup & handle is a continuation — require a prior up-trend into the cup.
         if not trend_aligned(df.iloc[:-n] if len(df) > n else df.iloc[:0], "bullish"):
             return ScanResult(matched=False)
-        w = df.iloc[-n:] if len(df) >= n else df
+        w = df.iloc[-n:]
         m = len(w)
         handle_len = max(3, int(m * HANDLE_FRAC))
         if m - handle_len < 15:
@@ -72,13 +75,17 @@ class CupHandleScanner(BaseScanner):
         if not (BOTTOM_CENTER[0] <= frac <= BOTTOM_CENTER[1]):
             return ScanResult(matched=False)
 
-        # Handle: below the rim (not yet broken out) and shallow vs the cup.
+        # Handle: a SHALLOW pullback near the right rim — not a deep drop toward
+        # the cup bottom. Must stay below the rim (no breakout yet), tight range,
+        # and retrace at most HANDLE_MAX_RETRACE of the cup depth from the rim.
         hh = float(handle["high"].max())
         hl = float(handle["low"].min())
         cup_depth_abs = rim - bottom
         if hh > rim * 1.02:
             return ScanResult(matched=False)
         if (hh - hl) > cup_depth_abs * HANDLE_MAX_DEPTH:
+            return ScanResult(matched=False)
+        if right_rim - hl > cup_depth_abs * HANDLE_MAX_RETRACE:  # too deep → not a handle
             return ScanResult(matched=False)
         if hl <= bottom:  # handle shouldn't dip below the cup bottom
             return ScanResult(matched=False)

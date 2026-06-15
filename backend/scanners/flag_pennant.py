@@ -43,7 +43,10 @@ def _slope_r2(y: np.ndarray):
 
 class FlagPennantScanner(BaseScanner):
     analysis_type = "flag_pennant"
-    window_size = PATTERN_LEN + LEAD  # pattern (~10 pole + ~15 cons) + trend context
+
+    def window_for(self, timeframe: str) -> int:
+        # Flag body stays short by nature; require >= min_months of prior trend.
+        return PATTERN_LEN + self.duration_candles(timeframe)
 
     legend = [
         {"label": "Pole",    "color": "#a855f7", "text": "Sharp directional move"},

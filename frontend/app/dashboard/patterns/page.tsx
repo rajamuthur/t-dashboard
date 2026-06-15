@@ -3,13 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Play, RefreshCw, Send, ChevronDown, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import PatternShapeChart from "@/components/PatternShapeChart";
 import {
-  PatternType, PatternRow, PatternDetail, Timeframe, PatternStats,
+  PatternType, PatternRow, PatternDetail, Timeframe, PatternStats, Universe,
   getPatternTypes, runPatternScan, getPatternScanStatus, listPatterns, getPatternDetail,
-  getPatternStats, sendPatternCharts,
+  getPatternStats, sendPatternCharts, getUniverses,
 } from "@/lib/patternsApi";
 import { fmtIsoDate } from "@/lib/dates";
 
 const TIMEFRAMES: Timeframe[] = ["5m", "15m", "30m", "1h", "4h", "day", "week", "month"];
+const DURATIONS = [{ v: 3, label: "3 mo" }, { v: 6, label: "6 mo" }, { v: 12, label: "1 yr" }];
 const POLL_MS = 2500;
 
 function pnlColor(p: number | null | undefined) {
@@ -43,6 +44,9 @@ export default function PatternsPage() {
   const [types, setTypes] = useState<PatternType[]>([]);
   const [analysisType, setAnalysisType] = useState<string>("");   // "" = all patterns
   const [timeframe, setTimeframe] = useState<Timeframe>("day");
+  const [universe, setUniverse] = useState<string>("fo");
+  const [universes, setUniverses] = useState<Universe[]>([]);
+  const [minMonths, setMinMonths] = useState<number>(3);
   const [rows, setRows] = useState<PatternRow[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<PatternStats | null>(null);
@@ -63,6 +67,7 @@ export default function PatternsPage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => { getPatternTypes().then(setTypes).catch(() => {}); }, []);
+  useEffect(() => { getUniverses().then(setUniverses).catch(() => {}); }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,16 +75,16 @@ export default function PatternsPage() {
       const [{ data, total }, st] = await Promise.all([
         listPatterns({
           analysis_type: analysisType || undefined,
-          timeframe,
+          timeframe, universe,
           outcome: outcomeFilter || undefined,
           symbol_filter: symbolFilter || undefined,
           sort_by: sortBy, sort_dir: sortDir, limit: 200,
         }),
-        getPatternStats({ analysis_type: analysisType || undefined, timeframe, symbol_filter: symbolFilter || undefined }),
+        getPatternStats({ analysis_type: analysisType || undefined, timeframe, universe, symbol_filter: symbolFilter || undefined }),
       ]);
       setRows(data); setTotal(total); setStats(st);
     } finally { setLoading(false); }
-  }, [analysisType, timeframe, outcomeFilter, symbolFilter, sortBy, sortDir]);
+  }, [analysisType, timeframe, universe, outcomeFilter, symbolFilter, sortBy, sortDir]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -88,13 +93,13 @@ export default function PatternsPage() {
   useEffect(() => {
     setSelected(new Set());
     setExpandedId(null);
-  }, [analysisType, timeframe, outcomeFilter, symbolFilter]);
+  }, [analysisType, timeframe, universe, outcomeFilter, symbolFilter]);
 
   async function runScan() {
     if (!analysisType) { setMsg("Pick a specific pattern to scan."); return; }
     setRunning(true); setMsg(null); setStatus("Starting…");
     try {
-      await runPatternScan(analysisType, timeframe);
+      await runPatternScan(analysisType, timeframe, universe, minMonths);
       for (let i = 0; i < 120; i++) {
         await new Promise(r => setTimeout(r, POLL_MS));
         const st = await getPatternScanStatus();
@@ -190,6 +195,18 @@ export default function PatternsPage() {
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white">
           <option value="">All patterns</option>
           {types.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+        <select value={universe} onChange={e => setUniverse(e.target.value)}
+          title="Stock universe to scan / show"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white">
+          {(universes.length ? universes : [{ key: "fo", label: "F&O", count: 0 }]).map(u => (
+            <option key={u.key} value={u.key}>{u.label}{u.count ? ` (${u.count})` : ""}</option>
+          ))}
+        </select>
+        <select value={minMonths} onChange={e => setMinMonths(Number(e.target.value))}
+          title="Minimum pattern duration for the next scan"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white">
+          {DURATIONS.map(d => <option key={d.v} value={d.v}>Min {d.label}</option>)}
         </select>
         <div className="flex gap-1">
           {TIMEFRAMES.map(tf => (
@@ -294,7 +311,7 @@ export default function PatternsPage() {
                               <Send size={12} /> Send chart
                             </button>
                           </div>
-                          <PatternShapeChart candles={det.candles} shapes={det.shapes} height={320} />
+                          <PatternShapeChart candles={det.candles} shapes={det.shapes} height={320} focusDate={r.candle_date} />
                         </div>
                       ) : (
                         <div className="text-gray-500 text-sm py-6 text-center">Loading chart…</div>

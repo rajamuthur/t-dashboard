@@ -14,8 +14,11 @@ class MorningStarScanner(BaseScanner):
     stars that are dips/throwbacks inside an uptrend, not bottom-fishing reversals.
     """
     analysis_type = "morning_star"
-    window_size = 3 + LEAD          # 3-candle pattern + trend context
     direction = "bullish"
+
+    def window_for(self, timeframe: str) -> int:
+        # 3-candle reversal + >= min_months of prior trend context.
+        return 3 + self.duration_candles(timeframe)
 
     marker_labels = ["C1", "C2", "C3"]
     marker_colors = ["#ef4444", "#f59e0b", "#22c55e"]

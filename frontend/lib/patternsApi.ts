@@ -67,8 +67,8 @@ export const getPatternTypes = () =>
 export const getUniverses = () =>
   call<Universe[]>("/patterns/universes").then(r => r.data);
 
-export const runPatternScan = (analysisType: string, timeframe: Timeframe, universe = "fo") =>
-  call<{ status: string }>(`/patterns/run?analysis_type=${analysisType}&timeframe=${timeframe}&universe=${universe}`, { method: "POST" }).then(r => r.data);
+export const runPatternScan = (analysisType: string, timeframe: Timeframe, universe = "fo", minMonths = 3) =>
+  call<{ status: string }>(`/patterns/run?analysis_type=${analysisType}&timeframe=${timeframe}&universe=${universe}&min_months=${minMonths}`, { method: "POST" }).then(r => r.data);
 
 export const getPatternScanStatus = () =>
   call<ScanStatus>("/patterns/status").then(r => r.data);

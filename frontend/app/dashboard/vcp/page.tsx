@@ -12,6 +12,7 @@ import { fmtIsoDate } from "@/lib/dates";
 // VCP is a weeks-long base pattern → daily & weekly are primary; monthly is
 // offered but rarely forms a clean contraction on this universe.
 const TIMEFRAMES: Timeframe[] = ["day", "week", "month"];
+const DURATIONS = [{ v: 3, label: "3 mo" }, { v: 6, label: "6 mo" }, { v: 12, label: "1 yr" }];
 const ANALYSIS = "vcp";
 const POLL_MS = 2500;
 
@@ -52,6 +53,7 @@ export default function VcpPage() {
   const [timeframe, setTimeframe] = useState<Timeframe>("day");
   const [universe, setUniverse] = useState<string>("fo");
   const [universes, setUniverses] = useState<Universe[]>([]);
+  const [minMonths, setMinMonths] = useState<number>(3);
   const [rows, setRows] = useState<PatternRow[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<PatternStats | null>(null);
@@ -97,7 +99,7 @@ export default function VcpPage() {
   async function runScan() {
     setRunning(true); setMsg(null); setStatus("Starting…");
     try {
-      await runPatternScan(ANALYSIS, timeframe, universe);
+      await runPatternScan(ANALYSIS, timeframe, universe, minMonths);
       for (let i = 0; i < 160; i++) {
         await new Promise(r => setTimeout(r, POLL_MS));
         const st = await getPatternScanStatus();
@@ -216,6 +218,11 @@ export default function VcpPage() {
             <option key={u.key} value={u.key}>{u.label}{u.count ? ` (${u.count})` : ""}</option>
           ))}
         </select>
+        <select value={minMonths} onChange={e => setMinMonths(Number(e.target.value))}
+          title="Minimum base duration for the next scan"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white">
+          {DURATIONS.map(d => <option key={d.v} value={d.v}>Min {d.label}</option>)}
+        </select>
         <input value={symbolFilter} onChange={e => setSymbolFilter(e.target.value)} placeholder="Symbol…"
           className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 w-32" />
         <select value={outcomeFilter} onChange={e => setOutcomeFilter(e.target.value)}
@@ -328,7 +335,7 @@ export default function VcpPage() {
                               <Send size={12} /> Send chart
                             </button>
                           </div>
-                          <PatternShapeChart candles={det.candles} shapes={det.shapes} height={340} />
+                          <PatternShapeChart candles={det.candles} shapes={det.shapes} height={340} focusDate={r.candle_date} />
                         </div>
                       ) : (
                         <div className="text-gray-500 text-sm py-6 text-center">Loading chart…</div>

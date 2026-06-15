@@ -14,8 +14,11 @@ class EveningStarScanner(BaseScanner):
     stars that are rallies/throwbacks inside a downtrend, not top-picking reversals.
     """
     analysis_type = "evening_star"
-    window_size = 3 + LEAD          # 3-candle pattern + trend context
     direction = "bearish"
+
+    def window_for(self, timeframe: str) -> int:
+        # 3-candle reversal + >= min_months of prior trend context.
+        return 3 + self.duration_candles(timeframe)
 
     marker_labels = ["C1", "C2", "C3"]
     marker_colors = ["#22c55e", "#f59e0b", "#ef4444"]

@@ -18,8 +18,6 @@ from .base import BaseScanner, ScanResult
 from ._trend import LEAD, trend_aligned
 from ._pivots import swing_pivots, fit_line
 
-TRIANGLE_LEN = 30          # candles forming the triangle (~6 weeks daily, >= 1 month)
-TREND_LEN = LEAD           # trend context before the triangle (>= ~1 month)
 FLAT_TOL = 0.0006          # |norm slope| below this is "flat" (per-candle, /price)
 TREND_TOL = 0.0015         # |norm slope| above this is clearly sloping (asc/desc)
 CONV_TOL = 0.0006          # slope floor for symmetrical convergence
@@ -40,11 +38,11 @@ def _fit(y: np.ndarray):
     return float(slope), float(intercept), 1 - ss_res / ss_tot
 
 
-def _detect(df: pd.DataFrame, want: str, timeframe: str) -> ScanResult:
-    if len(df) < TRIANGLE_LEN:
+def _detect(df: pd.DataFrame, want: str, timeframe: str, formation: int) -> ScanResult:
+    if len(df) < formation:
         return ScanResult(matched=False)
-    tri = df.iloc[-TRIANGLE_LEN:]
-    lead = df.iloc[:-TRIANGLE_LEN]          # trend context before the triangle
+    tri = df.iloc[-formation:]
+    lead = df.iloc[:-formation]          # trend context before the triangle
     n = len(tri)
     highs = tri["high"].values.astype(float)
     lows = tri["low"].values.astype(float)
@@ -57,8 +55,9 @@ def _detect(df: pd.DataFrame, want: str, timeframe: str) -> ScanResult:
     nsh, nsl = sh / close, sl / close   # per-candle slope normalised by price
 
     # --- Screen: range narrowing + shape (regression-based, drives win-rate) ---
-    early = float(highs[:6].mean() - lows[:6].mean())
-    late = float(highs[-6:].mean() - lows[-6:].mean())
+    band = max(6, n // 5)               # compare the first/last ~20% of the formation
+    early = float(highs[:band].mean() - lows[:band].mean())
+    late = float(highs[-band:].mean() - lows[-band:].mean())
     if early <= 0 or late >= early * COMPRESSION:
         return ScanResult(matched=False)
 
@@ -147,7 +146,7 @@ def _detect(df: pd.DataFrame, want: str, timeframe: str) -> ScanResult:
         "stop_loss": stop,
         "target": target,
         "touches": f"{n_th}H/{n_tl}L",
-        "span_candles": TRIANGLE_LEN,
+        "span_candles": int(n),
         "shapes": [
             {"type": "trendline", "color": "#f59e0b", "label": "Resistance", "points": res_pts},
             {"type": "trendline", "color": "#f59e0b", "label": "Support", "points": sup_pts},
@@ -170,23 +169,24 @@ class _TriangleBase(BaseScanner):
         {"label": "Target",     "color": "#3b82f6", "text": "Breakout +/- triangle height"},
     ]
 
+    def window_for(self, timeframe: str) -> int:
+        # The triangle FORMS over >= min_months, plus trend context.
+        return self.duration_candles(timeframe) + LEAD
+
     def run(self, symbol: str, timeframe: str, df: pd.DataFrame) -> ScanResult:
-        return _detect(df, self.want, timeframe)
+        return _detect(df, self.want, timeframe, self.duration_candles(timeframe))
 
 
 class AscendingTriangleScanner(_TriangleBase):
     analysis_type = "ascending_triangle"
-    window_size = TRIANGLE_LEN + LEAD        # triangle + trend context
     want = "ascending"
 
 
 class DescendingTriangleScanner(_TriangleBase):
     analysis_type = "descending_triangle"
-    window_size = TRIANGLE_LEN + LEAD        # triangle + trend context
     want = "descending"
 
 
 class SymmetricalTriangleScanner(_TriangleBase):
     analysis_type = "symmetrical_triangle"
-    window_size = TRIANGLE_LEN + LEAD        # triangle + prior-trend bias / context
     want = "symmetrical"

@@ -59,6 +59,7 @@ async def run(
     analysis_type: str = Query(...),
     timeframe: str = Query(default="day"),
     universe: str = Query(default="fo"),
+    min_months: float = Query(default=3.0, ge=1.0, le=24.0),
     _: str = Depends(get_current_user),
 ):
     if analysis_type not in PATTERN_ANALYSIS_TYPES:
@@ -67,8 +68,9 @@ async def run(
         raise HTTPException(400, f"Unsupported timeframe: {timeframe}")
     if universe not in UNIVERSES:
         raise HTTPException(400, f"Unknown universe: {universe}")
-    background_tasks.add_task(run_pattern_scan, analysis_type, timeframe, universe)
-    return {"status": "started", "analysis_type": analysis_type, "timeframe": timeframe, "universe": universe}
+    background_tasks.add_task(run_pattern_scan, analysis_type, timeframe, universe, min_months)
+    return {"status": "started", "analysis_type": analysis_type, "timeframe": timeframe,
+            "universe": universe, "min_months": min_months}
 
 
 @router.get("/status")
@@ -235,7 +237,7 @@ async def _detail_payload(db: aiosqlite.Connection, scan_id: int, full: bool = F
     det = signal.get("details") or {}
     tf = signal["timeframe"]
     scanner = get_scanner(signal["analysis_type"])
-    window = scanner.window_size
+    window = scanner.window_for(tf)
 
     async with db.execute(
         "SELECT date, open, high, low, close, volume FROM candles "

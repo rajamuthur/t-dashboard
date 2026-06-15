@@ -131,7 +131,8 @@ def _dedup_overlaps(occurrences, date_to_pos: dict, min_gap: int):
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
-async def run_pattern_scan(analysis_type: str, timeframe: str = "day", universe: str = "fo") -> dict:
+async def run_pattern_scan(analysis_type: str, timeframe: str = "day", universe: str = "fo",
+                           min_months: float = 3.0) -> dict:
     global _status
     if analysis_type not in PATTERN_ANALYSIS_TYPES:
         raise ValueError(f"Not a pattern scanner: {analysis_type!r}")
@@ -140,7 +141,8 @@ async def run_pattern_scan(analysis_type: str, timeframe: str = "day", universe:
     started_at = datetime.now(timezone.utc).isoformat()
     scan_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     _status = {"status": "running", "step": "Starting...", "matched": 0, "total": 0,
-               "analysis_type": analysis_type, "timeframe": timeframe, "universe": universe}
+               "analysis_type": analysis_type, "timeframe": timeframe, "universe": universe,
+               "min_months": min_months}
 
     async with aiosqlite.connect(db_path) as db:
         cur = await db.execute(
@@ -169,6 +171,7 @@ async def run_pattern_scan(analysis_type: str, timeframe: str = "day", universe:
             await asyncio.to_thread(backfill_timeframe, db_path, stocks, timeframe, _status)
 
         scanner = get_scanner(analysis_type)
+        scanner.min_months = min_months
         matched, inserted = await _scan_all(scanner, stocks, analysis_type, timeframe, session_id, db_path)
 
         async with aiosqlite.connect(db_path) as db:
@@ -207,7 +210,8 @@ async def _scan_all(scanner, stocks, analysis_type, timeframe, session_id, db_pa
     scanned_at = datetime.now(timezone.utc).isoformat()
     matched = 0
     inserted: list[dict] = []
-    min_gap = max(2, scanner.window_size // 2)
+    win = scanner.window_for(timeframe)
+    min_gap = max(2, win // 2)
 
     async with aiosqlite.connect(db_path) as db:
         for si, symbol in enumerate(stocks):
@@ -218,7 +222,7 @@ async def _scan_all(scanner, stocks, analysis_type, timeframe, session_id, db_pa
                 [symbol, timeframe],
             ) as cur:
                 rows = await cur.fetchall()
-            if len(rows) < scanner.window_size:
+            if len(rows) < win:
                 continue
 
             df = pd.DataFrame(list(rows),

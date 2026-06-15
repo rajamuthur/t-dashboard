@@ -28,6 +28,9 @@ interface Props {
   candles: PatternCandle[];
   shapes: PatternShape[];
   height?: number;
+  // When set, the chart opens showing ~1 year around this date (the signal),
+  // and the user can scroll left into earlier history (full data is loaded).
+  focusDate?: string;
 }
 
 // Convert a stored candle/shape date to a lightweight-charts time (unix seconds).
@@ -38,7 +41,7 @@ function toTime(d: string): UTCTimestamp {
   return Math.floor(t / 1000) as UTCTimestamp;
 }
 
-export default function PatternShapeChart({ candles, shapes, height = 320 }: Props) {
+export default function PatternShapeChart({ candles, shapes, height = 320, focusDate }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -160,13 +163,21 @@ export default function PatternShapeChart({ candles, shapes, height = 320 }: Pro
     }
 
     chartRef.current = chart;
-    chart.timeScale().fitContent();
+    // Default view: ~1 year around the signal (scroll left for earlier years).
+    // Falls back to fitting all data when no focus date is given.
+    if (focusDate && lc.length) {
+      const ft = toTime(focusDate);
+      const YEAR = 365 * 24 * 3600;
+      chart.timeScale().setVisibleRange({ from: (ft - YEAR) as any, to: (ft + 30 * 24 * 3600) as any });
+    } else {
+      chart.timeScale().fitContent();
+    }
     const ro = new ResizeObserver(() => {
       if (ref.current) chart.applyOptions({ width: ref.current.clientWidth, height: ref.current.clientHeight });
     });
     ro.observe(ref.current);
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
-  }, [lc, shapes, height, enabled, intraday, fs]);
+  }, [lc, shapes, height, enabled, intraday, fs, focusDate]);
 
   if (candles.length === 0) {
     return <div className="flex items-center justify-center text-gray-500 bg-white rounded-lg" style={{ height }}>No candle data</div>;

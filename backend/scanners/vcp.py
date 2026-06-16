@@ -52,7 +52,8 @@ REVERSAL = {"day": 0.04, "week": 0.05, "month": 0.06}
 MIN_TS = 2                 # at least two contractions ("Ts")
 MAX_TS = 6                 # Minervini: 2-6, typically 2-4; more == choppy, reject
 DEEP_MIN = 0.08            # deepest contraction must be a real correction...
-DEEP_MAX = 0.50            # ...but a base, not a crash
+DEEP_MAX = 0.35            # ...but a base contraction, not a major correction/crash
+BASE_HIGH_SPREAD = 0.18    # contraction highs must cluster within this of the pivot (a consolidation under a ceiling, not a trending advance)
 FINAL_TIGHT_MAX = 0.10     # final (tightest) contraction <= this
 TIGHT_VS_DEEP = 0.60       # final must have contracted to <= 60% of the deepest
 NEAR_PIVOT = 0.08          # signal fires only while price is coiled under the pivot
@@ -199,11 +200,22 @@ class VCPScanner(BaseScanner):
             return ScanResult(matched=False)
         if tightest > min(depths) * 1.15:     # final must be (near) the tightest leg
             return ScanResult(matched=False)
+        # Volatility must be FRONT-LOADED (genuinely contracting), not erratic /
+        # expanding mid-base: the deepest contraction sits in the first half.
+        if depths.index(deepest) > (len(depths) - 1) // 2:
+            return ScanResult(matched=False)
+
+        # A VCP is a CONSOLIDATION under a pivot ceiling — the contraction highs
+        # must cluster near a common level, not make new highs across the whole
+        # move (that's a trending advance, not a base).
+        c_highs = [c[1] for c in contractions]
+        pivot = contractions[-1][1]
+        if pivot <= 0 or (max(c_highs) - min(c_highs)) / pivot > BASE_HIGH_SPREAD:
+            return ScanResult(matched=False)
 
         # Pivot = high of the LAST contraction; signal must be coiled under it
         # (not already broken out) so the forward outcome eval can confirm.
         last = contractions[-1]
-        pivot = last[1]
         final_low = last[3]
         close_i = ind["close"][i]
         if pivot <= 0 or final_low <= 0 or close_i <= 0:

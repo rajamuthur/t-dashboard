@@ -64,6 +64,23 @@ class TightRangeScanner(BaseScanner):
         if big_wick_ratio > 0.30:
             return ScanResult(matched=False)
 
+        # Accumulation vs Distribution (price + volume read of the base):
+        #   - close location: where price closes within each candle's range
+        #     (upper half = demand/buying, lower half = supply/selling);
+        #   - up-day vs down-day volume (net buying vs selling into the base).
+        close_loc = float(((window["close"] - window["low"]) / ranges).mean())  # 0..1
+        up_mask = window["close"] > window["open"]
+        dn_mask = window["close"] < window["open"]
+        up_vol = float(window.loc[up_mask, "volume"].sum())
+        dn_vol = float(window.loc[dn_mask, "volume"].sum())
+        vol_skew = (up_vol - dn_vol) / ((up_vol + dn_vol) or 1.0)               # -1..1
+        if close_loc >= 0.5 and up_vol >= dn_vol:
+            bias = "accumulation"
+        elif close_loc < 0.5 and dn_vol > up_vol:
+            bias = "distribution"
+        else:
+            bias = "neutral"
+
         candle_date = str(window.index[-1])[:10]
         close_price = float(window["close"].iloc[-1])
         details = {
@@ -72,6 +89,9 @@ class TightRangeScanner(BaseScanner):
             "vol_ratio":      round(vol_ratio, 3),
             "rsi":            round(rsi, 2),
             "big_wick_ratio": round(big_wick_ratio * 100, 1),
+            "bias":           bias,
+            "close_loc_pct":  round(close_loc * 100, 1),
+            "vol_skew":       round(vol_skew, 2),
             "entry_close":    round(close_price, 2),
             "stop_loss":      round(min_low, 2),
             "resistance":     round(max_high, 2),

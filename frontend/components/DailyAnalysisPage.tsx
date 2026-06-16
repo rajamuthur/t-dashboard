@@ -10,10 +10,21 @@ import {
   AIAnalysis, DailyScanStatus,
 } from "@/lib/api";
 import { sendToTelegram } from "@/lib/telegramApi";
-import PatternChart from "./PatternChart";
+import { getUniverses, Universe } from "@/lib/patternsApi";
+import PatternShapeChart, { PatternShape } from "./PatternShapeChart";
 import AIAnalysisPanel from "./AIAnalysisPanel";
 
 const POLL_MS = 3000;
+
+function BiasBadge({ bias }: { bias?: string }) {
+  if (!bias) return <span className="text-gray-600">—</span>;
+  const map: Record<string, string> = {
+    accumulation: "bg-green-500/15 text-green-300",
+    distribution: "bg-red-500/15 text-red-300",
+    neutral: "bg-gray-600/30 text-gray-400",
+  };
+  return <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${map[bias] ?? map.neutral}`}>{bias}</span>;
+}
 
 export default function DailyAnalysisPage() {
   const [sessions,        setSessions]        = useState<DailyScanSession[]>([]);
@@ -23,6 +34,8 @@ export default function DailyAnalysisPage() {
   const [page,            setPage]            = useState(0);
   const PAGE_SIZE = 50;
 
+  const [universe,     setUniverse]     = useState("fo");
+  const [universes,    setUniverses]    = useState<Universe[]>([]);
   const [symbolFilter, setSymbolFilter] = useState("");
   const [fromDate,     setFromDate]     = useState("");
   const [toDate,       setToDate]       = useState("");
@@ -65,6 +78,8 @@ export default function DailyAnalysisPage() {
     } finally { setSending(false); }
   }
 
+  useEffect(() => { getUniverses().then(setUniverses).catch(() => {}); }, []);
+
   // Load sessions on mount
   useEffect(() => {
     getDailyScanSessions("tight_range", 50)
@@ -83,6 +98,7 @@ export default function DailyAnalysisPage() {
         analysis_type: "tight_range",
         session_id:    selectedSession ?? undefined,
         symbol_filter: symbolFilter || undefined,
+        universe:      universe || undefined,
         from_date:     fromDate || undefined,
         to_date:       toDate   || undefined,
         sort_by:       sortBy,
@@ -93,7 +109,7 @@ export default function DailyAnalysisPage() {
       setResults(Array.isArray(data) ? data : []);
       setTotal(typeof total === "number" ? total : 0);
     } catch {}
-  }, [selectedSession, symbolFilter, fromDate, toDate, sortBy, sortDir, page]);
+  }, [selectedSession, universe, symbolFilter, fromDate, toDate, sortBy, sortDir, page]);
 
   useEffect(() => { loadResults(); }, [loadResults]);
 
@@ -128,7 +144,7 @@ export default function DailyAnalysisPage() {
     setRunning(true);
     setScanStatus({ status: "running", step: "Starting…" });
     try {
-      await runDailyScan("tight_range");
+      await runDailyScan("tight_range", universe);
       startPolling();
     } catch {
       setRunning(false);
@@ -218,6 +234,16 @@ export default function DailyAnalysisPage() {
 
       {/* Session selector + stats */}
       <div className="flex flex-wrap items-center gap-3">
+        <select
+          value={universe}
+          onChange={e => { setUniverse(e.target.value); setPage(0); }}
+          title="Stock universe to scan / show"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-brand-500"
+        >
+          {(universes.length ? universes : [{ key: "fo", label: "F&O", count: 0 }]).map(u => (
+            <option key={u.key} value={u.key}>{u.label}{u.count ? ` (${u.count})` : ""}</option>
+          ))}
+        </select>
         <div className="flex items-center gap-2">
           <Clock size={14} className="text-gray-400" />
           <select
@@ -309,6 +335,7 @@ export default function DailyAnalysisPage() {
               <th className="px-4 py-3 text-right">RSI</th>
               <th className="px-4 py-3 text-right">Vol Ratio</th>
               <th className="px-4 py-3 text-right">Wick %</th>
+              <th className="px-4 py-3 text-center">Bias</th>
               <SortTh label="Date"     col="candle_date" sortBy={sortBy} sortDir={sortDir} onSort={toggleSort} right />
               <th className="px-4 py-3 text-center">AI</th>
             </tr>
@@ -316,7 +343,7 @@ export default function DailyAnalysisPage() {
           <tbody>
             {results.length === 0 && (
               <tr>
-                <td colSpan={10} className="text-center py-12 text-gray-500">
+                <td colSpan={11} className="text-center py-12 text-gray-500">
                   {sessions.length === 0
                     ? 'No scans yet. Click "Run Scan" to start.'
                     : "No results match the current filters."}
@@ -364,6 +391,7 @@ export default function DailyAnalysisPage() {
                   <td className="px-4 py-3 text-right text-gray-300">
                     {d ? `${d.big_wick_ratio}%` : "—"}
                   </td>
+                  <td className="px-4 py-3 text-center"><BiasBadge bias={d?.bias} /></td>
                   <td className="px-4 py-3 text-right text-gray-400">{r.candle_date}</td>
                   <td className="px-4 py-3 text-center">
                     {r.has_ai_analysis
@@ -374,20 +402,28 @@ export default function DailyAnalysisPage() {
 
                 expanded && (
                   <tr key={`${r.id}-detail`} className="bg-gray-900/80 border-b border-gray-800">
-                    <td colSpan={10} className="px-6 py-5">
+                    <td colSpan={11} className="px-6 py-5">
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                         {/* Chart */}
                         <div>
-                          <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide">30-Day Daily Chart</p>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs text-gray-500 uppercase tracking-wide">Daily Chart · indicators + fullscreen</p>
+                            {d?.bias && (
+                              <span className="flex items-center gap-1.5 text-xs text-gray-400">
+                                <BiasBadge bias={d.bias} />
+                                {d.close_loc_pct != null && <span>close @ {d.close_loc_pct}% of range</span>}
+                              </span>
+                            )}
+                          </div>
                           {detail ? (
-                            <PatternChart
+                            <PatternShapeChart
                               candles={detail.candles}
-                              patternLength={detail.candles.length}
-                              entryClose={detail.entry_close ?? undefined}
-                              stopLoss={detail.stop_loss ?? undefined}
-                              height={240}
-                              markerLabels={[]}
-                              markerColors={[]}
+                              shapes={(d ? [
+                                { type: "hline", price: d.band_high,   color: "#3b82f6", label: "Band high" },
+                                { type: "hline", price: d.entry_close,  color: "#22c55e", label: "Entry" },
+                                { type: "hline", price: d.stop_loss,    color: "#ef4444", label: "Stop (band low)" },
+                              ] : []) as PatternShape[]}
+                              height={300}
                             />
                           ) : (
                             <div className="flex items-center justify-center h-40 text-gray-500 text-sm">

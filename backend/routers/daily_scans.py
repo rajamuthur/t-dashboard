@@ -10,10 +10,19 @@ from ..auth import get_current_user
 from ..db import _get_db_path, get_db
 from ..ai_service import get_or_create_ai_analysis
 from ..daily_scan_service import get_scan_status, run_daily_pattern_scan
+from ..universe_service import get_universe_stocks, UNIVERSES
 
 router = APIRouter(prefix="/daily-scans", tags=["daily-scans"])
 
 ALLOWED_ANALYSIS_TYPES = {"tight_range"}
+
+
+async def _universe_filter(universe: Optional[str]) -> Optional[list[str]]:
+    """Resolve a universe key to its symbol list, or None for no filter ('fo' = all)."""
+    if not universe or universe == "fo" or universe not in UNIVERSES:
+        return None
+    syms = await get_universe_stocks(universe)
+    return syms or None
 
 
 # ---------------------------------------------------------------------------
@@ -24,12 +33,15 @@ ALLOWED_ANALYSIS_TYPES = {"tight_range"}
 async def run_scan(
     background_tasks: BackgroundTasks,
     analysis_type: str = Query(default="tight_range"),
+    universe: str = Query(default="fo"),
     _: str = Depends(get_current_user),
 ):
     if analysis_type not in ALLOWED_ANALYSIS_TYPES:
         raise HTTPException(status_code=400, detail=f"Unknown analysis_type: {analysis_type}")
-    background_tasks.add_task(run_daily_pattern_scan, analysis_type)
-    return {"status": "started", "analysis_type": analysis_type}
+    if universe not in UNIVERSES:
+        raise HTTPException(status_code=400, detail=f"Unknown universe: {universe}")
+    background_tasks.add_task(run_daily_pattern_scan, analysis_type, universe)
+    return {"status": "started", "analysis_type": analysis_type, "universe": universe}
 
 
 @router.get("/status")
@@ -104,6 +116,7 @@ async def list_results(
     analysis_type: str = Query(default="tight_range"),
     session_id: Optional[int] = None,
     symbol_filter: Optional[str] = None,
+    universe: Optional[str] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     sort_by: str = Query(default="candle_date", regex="^(candle_date|symbol|scanned_at)$"),
@@ -116,6 +129,10 @@ async def list_results(
     filters = ["sr.timeframe='day'", "sr.analysis_type=?", "sr.matched=1"]
     params: list = [analysis_type]
 
+    uni_syms = await _universe_filter(universe)
+    if uni_syms is not None:
+        filters.append(f"sr.symbol IN ({','.join('?' * len(uni_syms))})")
+        params.extend(uni_syms)
     if session_id is not None:
         filters.append("sr.session_id=?")
         params.append(session_id)
@@ -178,11 +195,12 @@ async def get_detail(
     if signal.get("details"):
         signal["details"] = json.loads(signal["details"])
 
-    # Return last 40 daily candles for the symbol (enough for 30-candle chart + context)
+    # Return last ~120 daily candles (≈6 months) so indicators have lookback and
+    # any recent breakout after the signal date is visible on the chart.
     async with db.execute(
         """SELECT date, open, high, low, close, volume FROM candles
            WHERE symbol=? AND timeframe='day'
-           ORDER BY date DESC LIMIT 40""",
+           ORDER BY date DESC LIMIT 120""",
         [signal["symbol"]],
     ) as cur:
         candle_rows = await cur.fetchall()

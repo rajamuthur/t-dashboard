@@ -306,6 +306,9 @@ export interface DailyScanDetails {
   vol_ratio: number;
   rsi: number;
   big_wick_ratio: number;
+  bias?: "accumulation" | "distribution" | "neutral";
+  close_loc_pct?: number;
+  vol_skew?: number;
   entry_close: number;
   stop_loss: number;
   resistance: number;
@@ -364,8 +367,8 @@ export interface DailyScanStatus {
   message?: string;
 }
 
-export function runDailyScan(analysis_type = "tight_range"): Promise<{ status: string; analysis_type: string }> {
-  return request(`/daily-scans/run?analysis_type=${analysis_type}`, { method: "POST" });
+export function runDailyScan(analysis_type = "tight_range", universe = "fo"): Promise<{ status: string; analysis_type: string }> {
+  return request(`/daily-scans/run?analysis_type=${analysis_type}&universe=${universe}`, { method: "POST" });
 }
 
 export function getDailyScanStatus(): Promise<DailyScanStatus> {
@@ -387,6 +390,7 @@ export async function getDailyResults(params: {
   analysis_type?: string;
   session_id?: number;
   symbol_filter?: string;
+  universe?: string;
   from_date?: string;
   to_date?: string;
   sort_by?: string;
@@ -398,6 +402,7 @@ export async function getDailyResults(params: {
   if (params.analysis_type)   q.set("analysis_type",  params.analysis_type);
   if (params.session_id != null) q.set("session_id",  String(params.session_id));
   if (params.symbol_filter)   q.set("symbol_filter",  params.symbol_filter);
+  if (params.universe)        q.set("universe",       params.universe);
   if (params.from_date)       q.set("from_date",      params.from_date);
   if (params.to_date)         q.set("to_date",        params.to_date);
   if (params.sort_by)         q.set("sort_by",        params.sort_by);

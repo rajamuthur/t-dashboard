@@ -6,7 +6,7 @@ import {
   IChartApi, UTCTimestamp, LineStyle,
 } from "lightweight-charts";
 import {
-  calcSMA, calcEMA, calcBollinger, calcSupertrend, calcIchimoku, calcPivotPoints,
+  calcSMA, calcEMA, calcBollinger, calcSupertrend, calcIchimoku, calcPivotPoints, calcCPR,
   calcFairValueGaps, calcVolumeProfile, calcVolume,
   calcRSI, calcMACD, calcStochastic, calcATR, calcADX, calcCCI, calcOBV, calcMFI, calcWilliamsR,
 } from "@/lib/indicators";
@@ -47,7 +47,7 @@ export default function PatternShapeChart({ candles, shapes, height = 320, focus
   const chartRef = useRef<IChartApi | null>(null);
   const [fs, setFs] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [enabled, setEnabled] = useState<Set<string>>(new Set());
+  const [enabled, setEnabled] = useState<Set<string>>(new Set(["volume"]));
 
   const intraday = useMemo(() => candles.some(c => c.date.includes(" ")), [candles]);
 
@@ -147,6 +147,7 @@ export default function PatternShapeChart({ candles, shapes, height = 320, focus
         case "supertrend": line(calcSupertrend(lc, 10, 3), INDICATOR_COLOR.supertrend, 0, { lineWidth: 2 }); break;
         case "ichimoku": { const i = calcIchimoku(lc); line(i.tenkan, INDICATOR_COLOR.ichi_tenkan); line(i.kijun, INDICATOR_COLOR.ichi_kijun); line(i.senkouA, INDICATOR_COLOR.ichi_senkouA, 0, { lineStyle: LineStyle.Dotted }); line(i.senkouB, INDICATOR_COLOR.ichi_senkouB, 0, { lineStyle: LineStyle.Dotted }); line(i.chikou, INDICATOR_COLOR.ichi_chikou, 0, { lineStyle: LineStyle.Dashed }); break; }
         case "pivots": { const p = calcPivotPoints(lc); if (p) { for (const [v, c, t] of [[p.r3, INDICATOR_COLOR.pivot_r, "R3"], [p.r2, INDICATOR_COLOR.pivot_r, "R2"], [p.r1, INDICATOR_COLOR.pivot_r, "R1"], [p.pp, INDICATOR_COLOR.pivot_pp, "P"], [p.s1, INDICATOR_COLOR.pivot_s, "S1"], [p.s2, INDICATOR_COLOR.pivot_s, "S2"], [p.s3, INDICATOR_COLOR.pivot_s, "S3"]] as [number, string, string][]) candleSeries.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: t }); } break; }
+        case "cpr": { const cp = calcCPR(lc); if (cp) { for (const [v, c, t, st] of [[cp.tc, INDICATOR_COLOR.cpr_tc, "TC", LineStyle.Dashed], [cp.pivot, INDICATOR_COLOR.cpr_pivot, "CPR", LineStyle.Solid], [cp.bc, INDICATOR_COLOR.cpr_bc, "BC", LineStyle.Dashed]] as [number, string, string, LineStyle][]) candleSeries.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: st, axisLabelVisible: true, title: t }); } break; }
         case "fvg": { for (const g of calcFairValueGaps(lc)) { const c = g.kind === "bull" ? INDICATOR_COLOR.fvg_bull : INDICATOR_COLOR.fvg_bear; candleSeries.createPriceLine({ price: g.top, color: c, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" }); candleSeries.createPriceLine({ price: g.bottom, color: c, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" }); } break; }
         case "vp": { const v = calcVolumeProfile(lc, 24); if (v) { candleSeries.createPriceLine({ price: v.poc, color: INDICATOR_COLOR.vp_poc, lineWidth: 2, axisLabelVisible: true, title: "POC" }); candleSeries.createPriceLine({ price: v.vah, color: INDICATOR_COLOR.vp_vah, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "VAH" }); candleSeries.createPriceLine({ price: v.val, color: INDICATOR_COLOR.vp_val, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "VAL" }); } break; }
         case "volume": hist(calcVolume(lc), "#64748b", pane++, { priceFormat: { type: "volume" } }); break;

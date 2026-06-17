@@ -63,7 +63,7 @@ function defaultPane(sources: LiveSource[], i: number): PaneConfig {
     source: src.name,
     symbol,
     timeframe: src.timeframes.includes("5m") ? "5m" : src.timeframes[0],
-    indicators: [],     // user opts in via Indicators panel
+    indicators: ["volume"],   // volume on by default; other indicators opt-in via the panel
   };
 }
 

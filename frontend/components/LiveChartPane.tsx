@@ -10,7 +10,7 @@ import {
   getLiveCandles, getLiveQuote, getHyperliquidWS, searchSymbols,
 } from "@/lib/liveSources";
 import {
-  calcSMA, calcEMA, calcBollinger, calcSupertrend, calcIchimoku, calcPivotPoints,
+  calcSMA, calcEMA, calcBollinger, calcSupertrend, calcIchimoku, calcPivotPoints, calcCPR,
   calcFairValueGaps, calcVolumeProfile, calcVolume,
   calcRSI, calcMACD, calcStochastic, calcATR, calcADX, calcCCI, calcOBV, calcMFI, calcWilliamsR,
 } from "@/lib/indicators";
@@ -225,6 +225,22 @@ export default function LiveChartPane({ config, sources, onChange }: Props) {
             axisLabelVisible: true, title: t,
           });
           handles.priceLines.push(pl);
+        }
+        break;
+      }
+      case "cpr": {
+        const cpr = calcCPR(candles);
+        if (!cpr) break;
+        const lines = [
+          { v: cpr.tc,    c: INDICATOR_COLOR.cpr_tc,    t: "TC", st: LineStyle.Dashed },
+          { v: cpr.pivot, c: INDICATOR_COLOR.cpr_pivot, t: "CPR", st: LineStyle.Solid },
+          { v: cpr.bc,    c: INDICATOR_COLOR.cpr_bc,    t: "BC", st: LineStyle.Dashed },
+        ];
+        for (const { v, c, t, st } of lines) {
+          handles.priceLines.push(ps.createPriceLine({
+            price: v, color: c, lineWidth: 1, lineStyle: st,
+            axisLabelVisible: true, title: t,
+          }));
         }
         break;
       }

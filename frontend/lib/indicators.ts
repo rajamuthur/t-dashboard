@@ -183,6 +183,20 @@ export function calcPivotPoints(candles: LiveCandle[]):
   return { pp, r1, r2, r3, s1, s2, s3 };
 }
 
+// CPR — Central Pivot Range (Pivot / Top-Central / Bottom-Central) from the
+// previous candle. Narrow TC↔BC ⇒ trending bias; wide ⇒ rangebound.
+export function calcCPR(candles: LiveCandle[]):
+  { pivot: number; tc: number; bc: number; widthPct: number } | null {
+  if (candles.length < 2) return null;
+  const prev = candles[candles.length - 2];
+  const pivot = (prev.high + prev.low + prev.close) / 3;
+  const bc = (prev.high + prev.low) / 2;
+  const tc = 2 * pivot - bc;               // mirror of BC about the pivot
+  const hi = Math.max(tc, bc), lo = Math.min(tc, bc);
+  const widthPct = pivot ? ((hi - lo) / pivot) * 100 : 0;
+  return { pivot, tc: hi, bc: lo, widthPct };
+}
+
 export function calcFairValueGaps(candles: LiveCandle[]): FVGZone[] {
   // Classic 3-candle FVG: gap between candle[i-2] and candle[i] (skipping the middle).
   const out: FVGZone[] = [];

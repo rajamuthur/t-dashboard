@@ -30,6 +30,7 @@ export const INDICATORS: IndicatorMeta[] = [
   { id: "supertrend",  label: "Supertrend (10, 3)", category: "trend",   render: "overlay" },
   { id: "ichimoku",    label: "Ichimoku Cloud",   category: "trend",      render: "overlay" },
   { id: "pivots",      label: "Pivot Points",     category: "trend",      render: "overlay" },
+  { id: "cpr",         label: "CPR (Central Pivot Range)", category: "trend", render: "overlay" },
 
   // PRICE ACTION
   { id: "fvg",         label: "Fair Value Gaps",          category: "price", render: "overlay" },
@@ -50,8 +51,8 @@ export const INDICATORS: IndicatorMeta[] = [
   { id: "williams",    label: "Williams %R",         category: "oscillator", render: "pane" },
 ];
 
-// Start with no indicators — user opts in via the panel.
-export const DEFAULT_INDICATORS = new Set<string>();
+// Volume is shown by default on every chart; other indicators are opt-in.
+export const DEFAULT_INDICATORS = new Set<string>(["volume"]);
 
 export const INDICATOR_COLOR: Record<string, string> = {
   sma20: "#60a5fa", ema50: "#f59e0b",
@@ -61,6 +62,7 @@ export const INDICATOR_COLOR: Record<string, string> = {
   ichi_senkouA: "#22c55e80", ichi_senkouB: "#ef444480",
   ichi_chikou: "#fbbf24",
   pivot_pp: "#facc15", pivot_r: "#22c55e", pivot_s: "#ef4444",
+  cpr_pivot: "#facc15", cpr_tc: "#38bdf8", cpr_bc: "#38bdf8",
   fvg_bull: "#22c55e40", fvg_bear: "#ef444440",
   vp_poc: "#a78bfa", vp_vah: "#22c55e", vp_val: "#ef4444",
   rsi: "#a78bfa", macd_line: "#22d3ee", macd_signal: "#f59e0b",

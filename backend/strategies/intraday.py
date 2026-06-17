@@ -11,29 +11,61 @@ from .base import Entry, IntradayStrategy
 class ORBStrategy(IntradayStrategy):
     key = "orb"
     label = "Opening Range Breakout"
-    description = "Break of the first 15 min (3 bars) high/low; stop at the opposite end, 1.5R target."
+    description = ("Break of the first 15 min range; stop at the opposite end, 1.5R target. "
+                   "Optional confirmation filters (volume / decisive close / prior-day bias / "
+                   "OR-width) are available but OFF by default — on 5m data they tested no better.")
     OR_BARS = 3
-    TARGET_R = 1.5
+    # Tunable filters (set on the instance to test variants). Defaults reproduce
+    # plain ORB; the confirmation filters did NOT improve expectancy on the 60-day
+    # 5m sample, so they ship OFF. Re-test with deeper history (Fyers) before relying on them.
+    target_r = 1.5
+    or_min_pct = 0.0           # OR-width gate disabled by default
+    or_max_pct = 999.0
+    latest = "14:45"           # allow breakouts through the session by default
+    require_strong_close = False
+    require_volume = False
+    vol_mult = 1.2
+    align_prior_day = False
 
     def generate(self, day: pd.DataFrame, prev_day: Optional[pd.DataFrame]) -> List[Entry]:
-        if len(day) < self.OR_BARS + 2:
+        n = len(day)
+        if n < self.OR_BARS + 2:
             return []
-        h = day["high"].to_numpy(float); l = day["low"].to_numpy(float); c = day["close"].to_numpy(float)
+        h = day["high"].to_numpy(float); l = day["low"].to_numpy(float)
+        c = day["close"].to_numpy(float); v = day["volume"].to_numpy(float)
         orh = float(h[:self.OR_BARS].max()); orl = float(l[:self.OR_BARS].min())
         if orl <= 0 or orh <= orl:
             return []
-        for i in range(self.OR_BARS, len(day)):
-            if self._too_late(day, i):
+        or_pct = (orh - orl) / orl * 100
+        if not (self.or_min_pct <= or_pct <= self.or_max_pct):     # OR-width gate
+            return []
+        or_vol = float(v[:self.OR_BARS].mean())
+        prev_close = float(prev_day["close"].iloc[-1]) if prev_day is not None and len(prev_day) else None
+
+        for i in range(self.OR_BARS, n):
+            if self._bar_time(day, i) >= self.latest:              # morning window only
                 break
-            px = float(c[i])
-            if px > orh:                       # first breakout up
+            px = float(c[i]); rng = max(h[i] - l[i], 1e-9)
+            up, down = px > orh, px < orl
+            if not (up or down):
+                continue
+            if self.require_strong_close:
+                loc = (px - l[i]) / rng                            # close location in the bar
+                if (up and loc < 0.70) or (down and loc > 0.30):
+                    continue
+            if self.require_volume and or_vol > 0 and v[i] < self.vol_mult * or_vol:
+                continue
+            if self.align_prior_day and prev_close:
+                if (up and px < prev_close) or (down and px > prev_close):
+                    continue
+            if up:
                 risk = px - orl
                 if risk > 0:
-                    return [Entry(i, "long", round(px, 2), round(orl, 2), round(px + self.TARGET_R * risk, 2), "ORB long")]
-            elif px < orl:                     # first breakdown
+                    return [Entry(i, "long", round(px, 2), round(orl, 2), round(px + self.target_r * risk, 2), "ORB long")]
+            else:
                 risk = orh - px
                 if risk > 0:
-                    return [Entry(i, "short", round(px, 2), round(orh, 2), round(px - self.TARGET_R * risk, 2), "ORB short")]
+                    return [Entry(i, "short", round(px, 2), round(orh, 2), round(px - self.target_r * risk, 2), "ORB short")]
         return []
 
 

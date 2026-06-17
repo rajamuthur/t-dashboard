@@ -6,9 +6,61 @@ Used because the Fyers token path needs interactive re-auth; yfinance gives
 when it's re-authenticated, but the pattern flow no longer depends on it.
 """
 import sqlite3
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import pandas as pd
+
+_UPSERT_SQL = (
+    "INSERT INTO candles (symbol, timeframe, date, open, high, low, close, volume) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(symbol, timeframe, date) DO UPDATE SET "
+    "open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close, volume=excluded.volume"
+)
+
+
+def backfill_intraday_fyers(db_path: str, stocks: List[str], resolution: str = "5",
+                            timeframe: str = "5m", days_back: int = 365,
+                            status: Optional[dict] = None) -> dict:
+    """Deep intraday backfill via Fyers (yfinance caps intraday at ~60 days).
+
+    Pages history in 100-day chunks (Fyers' per-request intraday limit) back
+    `days_back` days and upserts into candles. Needs a valid Fyers token.
+    """
+    from .downloaders.fyers import FyersDownloader
+    d = FyersDownloader()
+    con = sqlite3.connect(db_path)
+    today = datetime.now()
+    start_all = today - timedelta(days=days_back)
+    ok = skipped = rows = 0
+    total = len(stocks)
+    for i, sym in enumerate(stocks):
+        if status is not None:
+            status["step"] = f"{sym} {timeframe} ({i + 1}/{total})"
+        got = 0
+        cur = start_all
+        while cur < today:
+            chunk_end = min(cur + timedelta(days=99), today)
+            try:
+                df = d.fetch_daily(sym, cur.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d"), resolution=resolution)
+            except Exception:
+                df = pd.DataFrame()
+            if df is not None and not df.empty:
+                batch = [
+                    (sym, timeframe, pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M:%S"),
+                     float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]),
+                     int(r.get("volume", 0) or 0))
+                    for ts, r in df.iterrows()
+                ]
+                con.executemany(_UPSERT_SQL, batch)
+                con.commit()
+                got += len(batch)
+            cur = chunk_end + timedelta(days=1)
+        if got:
+            ok += 1; rows += got
+        else:
+            skipped += 1
+    con.close()
+    return {"symbols_ok": ok, "skipped": skipped, "rows": rows, "timeframe": timeframe}
 
 # Index symbols that don't follow the SYMBOL.NS convention.
 _INDEX_MAP = {

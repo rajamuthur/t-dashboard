@@ -46,10 +46,11 @@ class FyersDownloader:
         self._fyers = self._build_client()
         return True
 
-    def fetch_daily(self, symbol: str, start: str, end: str, _retried: bool = False) -> pd.DataFrame:
+    def fetch_daily(self, symbol: str, start: str, end: str, _retried: bool = False,
+                    resolution: str = "D") -> pd.DataFrame:
         payload = {
             "symbol": symbol,
-            "resolution": "D",
+            "resolution": resolution,        # "D" daily, "5"/"15"/... intraday minutes
             "date_format": "1",
             "range_from": start,
             "range_to": end,
@@ -58,7 +59,7 @@ class FyersDownloader:
         resp = self._fyers.history(payload)
         if isinstance(resp, dict) and resp.get("s") == "error" and not _retried:
             if self._try_refresh():
-                return self.fetch_daily(symbol, start, end, _retried=True)
+                return self.fetch_daily(symbol, start, end, _retried=True, resolution=resolution)
         if not resp or "candles" not in resp or not resp["candles"]:
             return pd.DataFrame()
         df = pd.DataFrame(resp["candles"], columns=["ts", "open", "high", "low", "close", "volume"])

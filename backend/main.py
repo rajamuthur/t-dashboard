@@ -14,6 +14,7 @@ from .routers.health import router as health_router
 from .routers.holidays import router as holidays_router
 from .routers.live_charts import router as live_charts_router
 from .routers.patterns import router as patterns_router
+from .routers.backtest import router as backtest_router
 from .routers.scans import router as scans_router
 from .routers.sync import router as sync_router
 from .routers.telegram import router as telegram_router
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     application.include_router(holidays_router)
     application.include_router(live_charts_router)
     application.include_router(patterns_router)
+    application.include_router(backtest_router)
     application.include_router(trades_router)
     application.include_router(telegram_router)
     application.include_router(health_router)

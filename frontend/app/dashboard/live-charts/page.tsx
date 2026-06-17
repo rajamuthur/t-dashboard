@@ -30,6 +30,8 @@ function loadStoredCount(): number {
   return (COUNT_OPTIONS as readonly number[]).includes(n) ? n : 2;
 }
 
+const LS_VOL_MIGRATED = "live-charts:volume-default-v1";
+
 function loadStoredPanes(): PaneConfig[] {
   if (typeof window === "undefined") return [];
   try {
@@ -37,7 +39,17 @@ function loadStoredPanes(): PaneConfig[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(p => p && typeof p.source === "string" && typeof p.symbol === "string" && typeof p.timeframe === "string");
+    const panes = parsed.filter(p => p && typeof p.source === "string" && typeof p.symbol === "string" && typeof p.timeframe === "string");
+    // One-time migration: ensure existing panes show volume by default. Runs
+    // once, then user toggles are respected (so removing volume sticks).
+    if (!window.localStorage.getItem(LS_VOL_MIGRATED)) {
+      panes.forEach(p => {
+        const inds = Array.isArray(p.indicators) ? p.indicators : [];
+        if (!inds.includes("volume")) p.indicators = [...inds, "volume"];
+      });
+      window.localStorage.setItem(LS_VOL_MIGRATED, "1");
+    }
+    return panes;
   } catch {
     return [];
   }

@@ -17,6 +17,24 @@ def get_scan_status() -> dict:
     return dict(_scan_status)
 
 
+async def clear_orphaned_sessions() -> int:
+    """Mark any still-'running' scan sessions as interrupted.
+
+    A scan runs as an in-process BackgroundTask; if the backend restarts (deploy,
+    crash) mid-scan, the session row is left status='running' forever and the UI
+    shows it as a perpetual scan. Called on startup to clean those up.
+    """
+    db_path = _get_db_path()
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("PRAGMA busy_timeout=15000")
+        cur = await db.execute(
+            "UPDATE daily_scan_sessions SET status='interrupted', "
+            "message='backend restarted mid-scan' WHERE status='running'"
+        )
+        await db.commit()
+        return cur.rowcount or 0
+
+
 async def run_daily_pattern_scan(analysis_type: str = "tight_range", universe: str = "fo") -> dict:
     """
     Full pipeline: resolve universe → sync daily candles (yfinance) → run scanner → store results.

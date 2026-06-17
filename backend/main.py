@@ -29,6 +29,14 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await init_db()
+        # A restart can leave a scan's session row stuck at status='running'
+        # (the BackgroundTask died). Mark those interrupted so the UI doesn't
+        # show a perpetual "scanning" session.
+        from .daily_scan_service import clear_orphaned_sessions
+        try:
+            await clear_orphaned_sessions()
+        except Exception:
+            pass
         if scheduler_enabled:
             start_scheduler()
         yield

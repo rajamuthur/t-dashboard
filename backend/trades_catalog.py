@@ -64,8 +64,16 @@ STOCK_LOT_SIZES: Dict[str, int] = {
 
 
 def lookup_lot_size(underlying: str) -> Optional[int]:
-    """Return the lot size for an underlying. None if unknown."""
+    """Lot size for an underlying — live Fyers F&O master first (kept current as
+    NSE revises lots quarterly), then the static snapshots as fallback."""
     u = (underlying or "").strip().upper()
+    try:
+        from .fyers_fo_master import lot_size as _fo_lot
+        m = _fo_lot(u)
+        if m:
+            return m
+    except Exception:
+        pass
     if u in INDEX_CATALOG:
         return INDEX_CATALOG[u]["lot_size"]
     if u in STOCK_LOT_SIZES:

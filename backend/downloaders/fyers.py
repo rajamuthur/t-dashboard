@@ -68,6 +68,18 @@ class FyersDownloader:
         df.drop(columns=["ts"], inplace=True)
         return df
 
+    def quote(self, symbol: str, _retried: bool = False):
+        """Live LTP for a Fyers symbol (e.g. NSE:SRF26AUGFUT). None if unavailable."""
+        resp = self._fyers.quotes({"symbols": symbol})
+        if isinstance(resp, dict) and resp.get("s") == "error" and not _retried:
+            if self._try_refresh():
+                return self.quote(symbol, _retried=True)
+        if isinstance(resp, dict) and resp.get("s") == "ok" and resp.get("d"):
+            v = resp["d"][0].get("v", {}) or {}
+            lp = v.get("lp") or v.get("last_price")
+            return float(lp) if lp else None
+        return None
+
     @staticmethod
     def resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
         return df.resample("W-FRI").agg(

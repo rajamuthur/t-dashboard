@@ -88,6 +88,8 @@ export interface TradeCatalog {
 }
 
 export const getCatalog = () => call<TradeCatalog>("/trades/catalog");
+export const getFoUnderlyings = () =>
+  call<{ underlyings: string[] }>("/trades/fo-underlyings").then(r => r.underlyings);
 export const getLotSize = (u: string) =>
   call<{ underlying: string; lot_size: number | null }>(`/trades/lot-size?underlying=${encodeURIComponent(u)}`);
 export const getExpiries = (u: string) =>

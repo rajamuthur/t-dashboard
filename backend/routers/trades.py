@@ -15,6 +15,7 @@ from ..trades_catalog import (
     INDEX_CATALOG, STOCK_LOT_SIZES, lookup_lot_size, underlying_yahoo_symbol,
     list_expiries, format_option_symbol, format_future_symbol,
 )
+from ..fyers_fo_master import future_symbol as fo_future_symbol, option_symbol as fo_option_symbol
 
 router = APIRouter(prefix="/trades", tags=["trades"])
 
@@ -119,6 +120,21 @@ async def catalog(_: str = Depends(get_current_user)):
         "indices": [{"key": k, **v} for k, v in INDEX_CATALOG.items()],
         "stocks": sorted(STOCK_LOT_SIZES.keys()),
     }
+
+
+@router.get("/fo-underlyings")
+async def fo_underlyings(_: str = Depends(get_current_user)):
+    """Clean F&O stock underlyings (no Yahoo .NS suffix / ^ indices) from the
+    live Fyers master — for the trade form's Stock (F&O) picker."""
+    try:
+        from ..fyers_fo_master import get_lot_sizes
+        idx = set(INDEX_CATALOG.keys())
+        stocks = sorted(u for u in get_lot_sizes() if u not in idx)
+        if stocks:
+            return {"underlyings": stocks}
+    except Exception:
+        pass
+    return {"underlyings": sorted(STOCK_LOT_SIZES.keys())}
 
 
 @router.get("/lot-size")
@@ -308,24 +324,44 @@ async def _fetch_price(yahoo_symbol: str) -> Optional[float]:
     return await asyncio.to_thread(_fetch)
 
 
-async def _refresh_trade(db: aiosqlite.Connection, trade: dict) -> Optional[float]:
-    """Fetch live price for a trade row. Options aren't auto-priced — the user
-    must update them manually via PATCH. Returns the price stored, or None."""
-    if trade["instrument_type"] == "option":
-        return None  # premium is not reliably available via yfinance
+def _fyers_contract_quote(trade: dict) -> Optional[float]:
+    """LTP of the trade's ACTUAL contract via Fyers (futures/options price the
+    real contract, not the spot). Returns None if no token / quote unavailable."""
+    it = trade["instrument_type"]
+    und = (trade["underlying"] or "").strip().upper()
+    exp = trade.get("expiry_date")
+    if it == "equity":
+        sym = f"NSE:{und}-EQ"
+    elif it == "future" and exp:
+        sym = fo_future_symbol(und, exp)
+    elif it == "option" and exp and trade.get("strike") and trade.get("option_type"):
+        sym = fo_option_symbol(und, exp, trade["option_type"], float(trade["strike"]))
+    else:
+        sym = None
+    if not sym:
+        return None
+    try:
+        from ..downloaders.fyers import FyersDownloader
+        return FyersDownloader().quote(sym)
+    except Exception:
+        return None
 
-    if trade["instrument_type"] == "equity":
-        # Equity: prefer the stored underlying (already a Yahoo-style symbol if user typed it that way).
+
+async def _refresh_trade(db: aiosqlite.Connection, trade: dict) -> Optional[float]:
+    """Update a trade's current price from its REAL contract (Fyers LTP). For
+    equity we fall back to the yfinance spot. Futures/options are NOT proxied
+    with spot any more — if the real contract price isn't available (e.g. Fyers
+    token expired) we leave current_price untouched rather than show a wrong one."""
+    price = await asyncio.to_thread(_fyers_contract_quote, trade)
+
+    if price is None and trade["instrument_type"] == "equity":
         yh = trade["underlying"]
         if "." not in yh and not yh.startswith("^"):
             yh = f"{yh}.NS"
-    else:
-        # Future: proxy with underlying's index/spot.
-        yh = underlying_yahoo_symbol(trade["underlying"])
+        price = await _fetch_price(yh)
 
-    price = await _fetch_price(yh)
     if price is None:
-        return None
+        return None  # don't overwrite with a wrong/stale proxy
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     await db.execute(
         "UPDATE trades SET current_price = ?, current_at = ? WHERE id = ?",

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import {
-  createTrade, getCatalog, getExpiries, getLotSize,
+  createTrade, getCatalog, getExpiries, getLotSize, getFoUnderlyings,
   InstrumentType, OptionType, Side, TradeCatalog,
 } from "@/lib/tradesApi";
 import { searchSymbols, SymbolMatch } from "@/lib/liveSources";
@@ -20,6 +20,7 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
   const [stockDraft, setStockDraft] = useState<string>("");
   const [stockMode, setStockMode] = useState<boolean>(false);
   const [stockSuggestions, setStockSuggestions] = useState<SymbolMatch[]>([]);
+  const [foUnderlyings, setFoUnderlyings] = useState<string[]>([]);
   const [side, setSide] = useState<Side>("buy");
   const [optionType, setOptionType] = useState<OptionType>("CE");
   const [strike, setStrike] = useState<string>("");
@@ -40,8 +41,9 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const entryAtRef = useRef<HTMLInputElement>(null);
 
-  // Load catalog once
+  // Load catalog + clean F&O underlying list once
   useEffect(() => { getCatalog().then(setCatalog).catch(() => {}); }, []);
+  useEffect(() => { getFoUnderlyings().then(setFoUnderlyings).catch(() => {}); }, []);
 
   // Esc to close
   useEffect(() => {
@@ -89,9 +91,10 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
     return () => { alive = false; };
   }, [effectiveUnderlying, instrument]);
 
-  // Stock search (yfinance India F&O)
+  // Equity mode searches any listed symbol (incl. US) via the live source.
+  // F&O stock mode uses the clean NSE F&O underlying list (no .NS / ^ junk).
   useEffect(() => {
-    if (!stockMode && instrument !== "equity") return;
+    if (instrument !== "equity") return;
     let cancelled = false;
     const handle = window.setTimeout(async () => {
       try {
@@ -100,7 +103,22 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
       } catch { /* ignore */ }
     }, 200);
     return () => { cancelled = true; window.clearTimeout(handle); };
-  }, [stockDraft, stockMode, instrument]);
+  }, [stockDraft, instrument]);
+
+  // Suggestions for the picker: clean F&O underlyings (filtered) for F&O stock
+  // mode; cleaned live-search hits for equity mode.
+  const pickerOptions = useMemo<{ value: string; label: string }[]>(() => {
+    if (stockMode) {
+      const q = stockDraft.trim().toUpperCase();
+      return foUnderlyings
+        .filter(u => !q || u.includes(q))
+        .slice(0, 50)
+        .map(u => ({ value: u, label: u }));
+    }
+    return stockSuggestions
+      .filter(s => !s.symbol.startsWith("^"))
+      .map(s => ({ value: s.symbol.replace(/\.NS$|\.BO$/i, ""), label: (s.label || s.symbol).replace(/\.NS$|\.BO$/i, "") }));
+  }, [stockMode, stockDraft, foUnderlyings, stockSuggestions]);
 
   async function submit() {
     setErr(null);
@@ -221,14 +239,12 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
                     className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-100"
                   />
                   <datalist id="trade-stock-dl">
-                    {stockSuggestions.map(s => (
-                      <option key={s.symbol} value={s.symbol.replace(/\.NS$|\.BO$/i, "")}>
-                        {s.label}
-                      </option>
+                    {pickerOptions.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                   </datalist>
                   <div className="text-[10px] text-gray-500 mt-1">
-                    Lot size auto-resolves from the NSE F&O catalog (e.g. RELIANCE = 500, TCS = 175). Override below if stale.
+                    Lot size auto-resolves from the live NSE F&O master (e.g. RELIANCE = 500, SRF = 200). Override below if needed.
                   </div>
                 </>
               )}

@@ -395,6 +395,21 @@ async def refresh_one(
     return trade
 
 
+@router.get("/fyers-status")
+async def fyers_status(_: str = Depends(get_current_user)):
+    """Is the Fyers token currently valid? (Quotes a known symbol.)"""
+    def _check():
+        try:
+            from ..downloaders.fyers import FyersDownloader
+            return FyersDownloader().quote("NSE:NIFTY50-INDEX")
+        except Exception:
+            return None
+    lp = await asyncio.to_thread(_check)
+    if lp:
+        return {"ok": True, "message": "Fyers token is valid."}
+    return {"ok": False, "message": "Fyers token expired or missing — paste a fresh access token in Settings."}
+
+
 @router.post("/refresh-all")
 async def refresh_all(
     db: aiosqlite.Connection = Depends(get_db),
@@ -402,14 +417,18 @@ async def refresh_all(
 ):
     cols = ", ".join(_TRADE_COLS)
     async with db.execute(
-        f"SELECT {cols} FROM trades WHERE status = 'open' AND instrument_type != 'option'"
+        f"SELECT {cols} FROM trades WHERE status = 'open'"   # equity, futures AND options
     ) as q:
         rows = await q.fetchall()
     updated = 0
     for r in rows:
         if await _refresh_trade(db, _row_to_dict(r)) is not None:
             updated += 1
-    return {"refreshed": updated, "skipped": len(rows) - updated}
+    skipped = len(rows) - updated
+    note = None
+    if rows and updated == 0:
+        note = "No prices updated — Fyers token likely expired. Update it in Settings."
+    return {"refreshed": updated, "skipped": skipped, "note": note}
 
 
 # --------------------------------------------------------------------------

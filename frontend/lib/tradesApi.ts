@@ -111,4 +111,8 @@ export const deleteTrade = (id: number) =>
 export const refreshOne = (id: number) =>
   call<Trade>(`/trades/${id}/refresh-price`, { method: "POST" });
 export const refreshAll = () =>
-  call<{ refreshed: number; skipped: number }>("/trades/refresh-all", { method: "POST" });
+  call<{ refreshed: number; skipped: number; note?: string | null }>("/trades/refresh-all", { method: "POST" });
+export const setFyersToken = (token: string) =>
+  call<{ key: string }>("/config/fyers_token", { method: "PUT", body: JSON.stringify({ value: token.trim() }) });
+export const getFyersStatus = () =>
+  call<{ ok: boolean; message: string }>("/trades/fyers-status");

@@ -109,16 +109,15 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
   // mode; cleaned live-search hits for equity mode.
   const pickerOptions = useMemo<{ value: string; label: string }[]>(() => {
     if (stockMode) {
-      const q = stockDraft.trim().toUpperCase();
-      return foUnderlyings
-        .filter(u => !q || u.includes(q))
-        .slice(0, 50)
-        .map(u => ({ value: u, label: u }));
+      // Render the full clean F&O list; the native datalist does the filtering
+      // as the user types (typing "SR" -> SRF). No React-side filter/slice — that
+      // was dropping matches like SRF when an earlier keystroke truncated the list.
+      return foUnderlyings.map(u => ({ value: u, label: u }));
     }
     return stockSuggestions
       .filter(s => !s.symbol.startsWith("^"))
       .map(s => ({ value: s.symbol.replace(/\.NS$|\.BO$/i, ""), label: (s.label || s.symbol).replace(/\.NS$|\.BO$/i, "") }));
-  }, [stockMode, stockDraft, foUnderlyings, stockSuggestions]);
+  }, [stockMode, foUnderlyings, stockSuggestions]);
 
   async function submit() {
     setErr(null);

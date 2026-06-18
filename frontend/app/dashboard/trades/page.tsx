@@ -7,7 +7,7 @@ import CloseTradeForm from "@/components/CloseTradeForm";
 import {
   Trade, TradeDashboard,
   listTrades, getDashboard, refreshAll, refreshOne,
-  deleteTrade,
+  deleteTrade, setFyersToken,
 } from "@/lib/tradesApi";
 import { sendToTelegram } from "@/lib/telegramApi";
 import { fmtIsoDateTime } from "@/lib/dates";
@@ -47,6 +47,9 @@ export default function TradesPage() {
   const [editing, setEditing] = useState<Trade | null>(null);
   const [closing, setClosing] = useState<Trade | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenMsg, setTokenMsg] = useState<string | null>(null);
+  const [showToken, setShowToken] = useState(false);
   const [filter, setFilter] = useState<"open" | "closed" | "all">("open");
   const [sortKey, setSortKey] = useState<SortKey>("entry_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -105,8 +108,27 @@ export default function TradesPage() {
 
   async function onRefreshAll() {
     setRefreshing(true);
-    try { await refreshAll(); await reload(); }
-    finally { setRefreshing(false); }
+    try {
+      const res = await refreshAll();
+      await reload();
+      if (res.note) { setTokenMsg(res.note); setShowToken(true); }
+      else { setTokenMsg(`Updated ${res.refreshed} live price(s).`); setShowToken(false); }
+    } finally { setRefreshing(false); }
+  }
+
+  async function saveToken() {
+    if (!tokenInput.trim()) return;
+    setTokenMsg("Saving token…");
+    try {
+      await setFyersToken(tokenInput);
+      setTokenInput("");
+      const res = await refreshAll();
+      await reload();
+      setTokenMsg(res.note ?? `Token saved — updated ${res.refreshed} live price(s).`);
+      if (!res.note) setShowToken(false);
+    } catch (e) {
+      setTokenMsg(`Error: ${e instanceof Error ? e.message : "save failed"}`);
+    }
   }
 
   async function onRefreshOne(t: Trade) {
@@ -214,6 +236,23 @@ export default function TradesPage() {
           </button>
         </div>
       </div>
+
+      {tokenMsg && (
+        <div className="text-xs px-3 py-2 rounded-lg bg-gray-800/60 border border-gray-700 text-gray-300 flex items-center gap-2 flex-wrap">
+          <span className={tokenMsg.startsWith("Error") ? "text-red-300" : ""}>{tokenMsg}</span>
+          {showToken && (
+            <span className="flex items-center gap-1 ml-auto">
+              <input type="password" value={tokenInput} onChange={e => setTokenInput(e.target.value)}
+                placeholder="Paste fresh Fyers access token"
+                className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-gray-100 w-72" />
+              <button onClick={saveToken} disabled={!tokenInput.trim()}
+                className="px-2 py-1 rounded bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-50">
+                Save &amp; refresh
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Dashboard */}

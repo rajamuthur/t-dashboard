@@ -13,10 +13,30 @@ class FyersDownloader:
         self._secret = os.getenv("APP_SECRET", "")
         self._fyers  = self._build_client()
 
+    @staticmethod
+    def _load_access_token() -> str:
+        """Prefer a token pasted at runtime via Settings (config table), so the
+        daily Fyers re-login is a paste — no .env edit / restart. Falls back to
+        the ACCESS_TOKEN env var."""
+        try:
+            import json
+            import sqlite3
+            from ..db import _get_db_path
+            con = sqlite3.connect(_get_db_path())
+            row = con.execute("SELECT value FROM config WHERE key='fyers_token'").fetchone()
+            con.close()
+            if row and row[0]:
+                tok = json.loads(row[0])
+                if tok:
+                    return str(tok).strip()
+        except Exception:
+            pass
+        return os.getenv("ACCESS_TOKEN", "")
+
     def _build_client(self):
         return fyersModel.FyersModel(
             client_id=self._app_id,
-            token=os.getenv("ACCESS_TOKEN", ""),
+            token=self._load_access_token(),
             log_path="",
         )
 

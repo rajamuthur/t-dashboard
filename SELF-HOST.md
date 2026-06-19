@@ -73,20 +73,32 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall-autostart.ps1
 
 ## 3. Expose it with Cloudflare Tunnel
 
-### Quick tunnel (random URL, zero config — good for testing)
+### Quick tunnel (random URL, zero config — no domain needed)
 
+One-off:
 ```powershell
-winget install --id Cloudflare.cloudflared
 cloudflared tunnel --url http://localhost:3000
 ```
-
 It prints a `https://<random>.trycloudflare.com` URL. Works instantly, but the
-URL changes each run and it isn't a background service.
+URL **changes on every restart** and isn't a background service.
+
+**Always-on (scripted):** the repo ships a self-contained tunnel —
+`scripts\cloudflare-tunnel.ps1` downloads `cloudflared` on first run (no winget
+needed) and keeps a quick tunnel up with auto-restart. Register it at logon:
+```powershell
+.\scripts\install-cloudflare-tunnel.ps1     # Admin PowerShell, once
+```
+Find the current public URL any time:
+```powershell
+Select-String trycloudflare scripts\logs\cloudflare.log | Select-Object -Last 1
+```
+The URL still rotates on each (re)start. For a fixed URL, use the named tunnel.
 
 ### Named tunnel (stable URL, runs as a service — recommended)
 
-Needs a free Cloudflare account. A domain is optional — a named tunnel works
-on a `*.cfargotunnel.com` hostname, or attach your own domain if you have one.
+Needs a free Cloudflare account **and a domain added to it** — a public,
+browsable hostname requires a domain you control (point its nameservers at
+Cloudflare). Without a domain, only the quick tunnel (random URL) is available.
 
 ```powershell
 cloudflared tunnel login                      # opens browser, authorize

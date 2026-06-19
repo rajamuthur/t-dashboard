@@ -81,3 +81,6 @@ Thumbs.db
 # Reference PDFs / books (large, copyrighted — keep local)
 books/
 *.pdf
+
+# cloudflared binary (downloaded at runtime)
+scripts/bin/

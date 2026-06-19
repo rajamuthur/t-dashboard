@@ -22,7 +22,9 @@ import requests
 from dotenv import set_key
 from fyers_apiv3 import fyersModel
 
-_BASE = "https://api-t1.fyers.in/api/v3"
+# Fyers login (vagator) service — separate host from the trading API.
+_VAGATOR = "https://api-t2.fyers.in/vagator/v2"
+_TOKEN_URL = "https://api-t1.fyers.in/api/v3/token"
 
 
 def _b64(s: str) -> str:
@@ -60,24 +62,24 @@ def auto_login() -> dict:
 
     s = requests.Session()
     try:
-        # 1) send login OTP
-        r = s.post(f"{_BASE}/send_login_otp_v2", json={"fy_id": _b64(c["fy_id"]), "app_id": "2"}, timeout=15)
+        # 1) send login OTP (vagator wants the PLAIN fy_id)
+        r = s.post(f"{_VAGATOR}/send_login_otp", json={"fy_id": c["fy_id"], "app_id": "2"}, timeout=15)
         rk = r.json().get("request_key")
         if not rk:
             return {"ok": False, "step": "send_otp", "message": str(r.json())[:200]}
 
         # 2) verify TOTP (retry once across a 30s rotation boundary)
         totp = pyotp.TOTP(c["totp"])
-        r = s.post(f"{_BASE}/verify_otp", json={"request_key": rk, "otp": totp.now()}, timeout=15)
+        r = s.post(f"{_VAGATOR}/verify_otp", json={"request_key": rk, "otp": totp.now()}, timeout=15)
         if not r.json().get("request_key"):
             time.sleep(1)
-            r = s.post(f"{_BASE}/verify_otp", json={"request_key": rk, "otp": totp.now()}, timeout=15)
+            r = s.post(f"{_VAGATOR}/verify_otp", json={"request_key": rk, "otp": totp.now()}, timeout=15)
         rk = r.json().get("request_key")
         if not rk:
             return {"ok": False, "step": "verify_otp", "message": str(r.json())[:200]}
 
         # 3) verify PIN -> login session token
-        r = s.post(f"{_BASE}/verify_pin", json={"request_key": rk, "identity_type": "pin", "identifier": _b64(c["pin"])}, timeout=15)
+        r = s.post(f"{_VAGATOR}/verify_pin", json={"request_key": rk, "identity_type": "pin", "identifier": c["pin"]}, timeout=15)
         login_token = (r.json().get("data") or {}).get("access_token")
         if not login_token:
             return {"ok": False, "step": "verify_pin", "message": str(r.json())[:200]}
@@ -86,7 +88,7 @@ def auto_login() -> dict:
         app_short = c["app_id"].split("-")[0]
         app_type = c["app_id"].split("-")[1] if "-" in c["app_id"] else "100"
         r = s.post(
-            f"{_BASE}/token",
+            _TOKEN_URL,
             headers={"authorization": f"Bearer {login_token}", "content-type": "application/json"},
             json={"fyers_id": c["fy_id"], "app_id": app_short, "redirect_uri": c["redirect"],
                   "appType": app_type, "code_challenge": "", "state": "auto", "scope": "",

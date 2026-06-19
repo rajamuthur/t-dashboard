@@ -19,6 +19,7 @@ from .routers.scans import router as scans_router
 from .routers.sync import router as sync_router
 from .routers.telegram import router as telegram_router
 from .routers.trades import router as trades_router
+from .routers.fyers_auth import router as fyers_auth_router
 
 
 def create_app() -> FastAPI:
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     application.include_router(backtest_router)
     application.include_router(trades_router)
     application.include_router(telegram_router)
+    application.include_router(fyers_auth_router)
     application.include_router(health_router)
     return application
 

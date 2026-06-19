@@ -8,6 +8,7 @@ import {
   getTelegramConfig, saveTelegramConfig, testTelegram,
 } from "@/lib/telegramApi";
 import StockListEditor from "@/components/StockListEditor";
+import FyersConnectionCard from "@/components/FyersConnectionCard";
 import { RefreshCw, Save, Check, AlertCircle, Send } from "lucide-react";
 
 // ── Tiny reusable helpers ─────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ function SaveBtn({ onClick, saving, saved }: { onClick: () => void; saving: bool
 }
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
-const TABS = ["Weekly", "Monthly", "Notifications", "Telegram", "F&O & Holidays"] as const;
+const TABS = ["Weekly", "Monthly", "Notifications", "Telegram", "Broker", "F&O & Holidays"] as const;
 type Tab = typeof TABS[number];
 
 export default function SettingsPage() {
@@ -440,6 +441,13 @@ export default function SettingsPage() {
               auto-alerts when a pattern scan finds freshly-formed setups.
             </p>
           </Card>
+        </div>
+      )}
+
+      {/* ── Broker tab ─────────────────────────────────────────────────────── */}
+      {activeTab === "Broker" && (
+        <div className="space-y-5">
+          <FyersConnectionCard />
         </div>
       )}
 

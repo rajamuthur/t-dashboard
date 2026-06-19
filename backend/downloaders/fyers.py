@@ -3,12 +3,15 @@ import os
 import requests
 import pandas as pd
 from datetime import datetime
-from dotenv import set_key
+from dotenv import set_key, load_dotenv
 from fyers_apiv3 import fyersModel
 
 
 class FyersDownloader:
     def __init__(self):
+        # Re-read .env so a token refreshed out-of-process (the daily auto-login
+        # task) is picked up without restarting the backend.
+        load_dotenv(override=True)
         self._app_id = os.getenv("CLIENT_APP_ID", "")
         self._secret = os.getenv("APP_SECRET", "")
         self._fyers  = self._build_client()

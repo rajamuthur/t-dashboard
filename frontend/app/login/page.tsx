@@ -29,7 +29,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-950">
       <div className="w-full max-w-sm bg-gray-900 rounded-2xl p-8 shadow-xl">
-        <h1 className="text-2xl font-bold text-white mb-1">Fyers Dashboard</h1>
+        <h1 className="text-2xl font-bold text-white mb-1">Dashboard</h1>
         <p className="text-gray-400 text-sm mb-6">Sign in to continue</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">

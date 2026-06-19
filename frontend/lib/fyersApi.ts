@@ -21,7 +21,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.status === 204 ? (undefined as T) : await res.json();
 }
 
-export interface FyersStatus { connected: boolean; message: string; }
+export interface FyersStatus { connected: boolean; message: string; expires_at?: number | null; }
 
 export const getFyersStatus = () => call<FyersStatus>("/fyers/status");
 export const fyersLogin = () => call<{ ok: boolean; message: string }>("/fyers/login", { method: "POST" });

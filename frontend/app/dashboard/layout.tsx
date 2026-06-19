@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { isLoggedIn, clearToken } from "@/lib/auth";
+import FyersTokenBadge from "@/components/FyersTokenBadge";
 import {
   LayoutDashboard, TrendingUp, Calendar,
   CandlestickChart, Settings, LogOut, ChevronDown, BarChart2, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen, Shapes, Target, FlaskConical,
@@ -51,9 +52,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex h-screen bg-gray-950 text-white overflow-hidden">
       <aside className="w-56 shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col">
-        <div className="px-4 py-5 border-b border-gray-800">
-          <span className="text-lg font-bold text-brand-500">Fyers</span>
-          <span className="text-lg font-semibold text-white"> Dashboard</span>
+        <div className="px-4 py-5 border-b border-gray-800 flex items-center justify-between">
+          <span className="text-lg font-semibold text-white">Dashboard</span>
+          <FyersTokenBadge />
         </div>
 
         <nav className="flex-1 py-4 space-y-1 px-2">

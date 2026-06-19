@@ -144,15 +144,35 @@ def auth_url() -> str:
     return session.generate_authcode()
 
 
+def _token_expiry() -> "int | None":
+    """Unix-epoch expiry decoded from the Fyers access token (a JWT). None if unparseable."""
+    import base64
+    import json
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    tok = os.getenv("ACCESS_TOKEN", "")
+    try:
+        parts = tok.split(".")
+        if len(parts) >= 2:
+            pl = parts[1] + "=" * (-len(parts[1]) % 4)
+            return json.loads(base64.urlsafe_b64decode(pl)).get("exp")
+    except Exception:
+        pass
+    return None
+
+
 def token_status() -> dict:
-    """Lightweight check whether the current ACCESS_TOKEN works."""
+    """Whether the current ACCESS_TOKEN works, plus its expiry epoch for a countdown."""
+    out: dict = {"expires_at": _token_expiry()}
     try:
         from .downloaders.fyers import FyersDownloader
         d = FyersDownloader()
         prof = d._fyers.get_profile()
         if isinstance(prof, dict) and prof.get("s") == "ok":
             name = (prof.get("data") or {}).get("name") or ""
-            return {"connected": True, "message": f"Connected{(' as ' + name) if name else ''}"}
-        return {"connected": False, "message": (prof or {}).get("message", "token invalid") if isinstance(prof, dict) else "token invalid"}
+            out.update({"connected": True, "message": f"Connected{(' as ' + name) if name else ''}"})
+        else:
+            out.update({"connected": False, "message": (prof or {}).get("message", "token invalid") if isinstance(prof, dict) else "token invalid"})
     except Exception as exc:
-        return {"connected": False, "message": f"{type(exc).__name__}: {exc}"}
+        out.update({"connected": False, "message": f"{type(exc).__name__}: {exc}"})
+    return out

@@ -22,6 +22,7 @@ const TOP_NAV = [
   { href: "/dashboard/live-charts",  label: "Live Charts",  icon: Radio },
   { href: "/dashboard/patterns",     label: "Patterns",     icon: Shapes },
   { href: "/dashboard/vcp",          label: "VCP Scanner",  icon: Target },
+  { href: "/dashboard/swing",        label: "Swing Trading", icon: TrendingUp },
   { href: "/dashboard/backtest",     label: "Backtest",     icon: FlaskConical },
   { href: "/dashboard/trades",       label: "Trades & P&L", icon: BookOpen },
   { href: "/dashboard/holidays",     label: "Holidays",     icon: CalendarDays },

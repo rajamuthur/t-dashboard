@@ -1,15 +1,17 @@
 "use client";
-import { useState } from "react";
-import { Play, RefreshCw, TrendingUp, Activity } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Play, RefreshCw, TrendingUp, Activity, ChevronDown, ChevronRight } from "lucide-react";
 import {
-  SwingTf, SwingResult, SwingSignal,
-  runSwingBacktest, getSwingStatus, getSwingRun, getSwingCurrent,
+  SwingTf, SwingResult, SwingSignal, SwingChart, SwingRunMeta,
+  runSwingBacktest, getSwingStatus, getSwingRun, getSwingRuns, getSwingCurrent, getSwingChart,
 } from "@/lib/swingApi";
+import { getUniverses, Universe } from "@/lib/patternsApi";
+import PatternShapeChart from "@/components/PatternShapeChart";
 
 const TFS: { v: SwingTf; label: string }[] = [
   { v: "day", label: "Daily" }, { v: "week", label: "Weekly" }, { v: "month", label: "Monthly" },
 ];
-const POLL_MS = 2500;
+const POLL_MS = 2000;
 const clean = (s: string) => s.replace("NSE:", "").replace("-EQ", "");
 const pnlColor = (p: number) => (p > 0 ? "text-green-400" : p < 0 ? "text-red-400" : "text-gray-300");
 
@@ -47,47 +49,78 @@ export default function SwingPage() {
   const [tab, setTab] = useState<"backtest" | "current">("backtest");
   const [timeframe, setTimeframe] = useState<SwingTf>("day");
   const [lookback, setLookback] = useState(22);
+  const [universe, setUniverse] = useState("nifty500");
+  const [universes, setUniverses] = useState<Universe[]>([]);
 
   const [running, setRunning] = useState(false);
-  const [status, setStatus] = useState("");
+  const [prog, setProg] = useState<{ current?: string; done?: number; pending?: number; total?: number; step?: string } | null>(null);
   const [result, setResult] = useState<SwingResult | null>(null);
+  const [lastRun, setLastRun] = useState<SwingRunMeta | null>(null);
 
   const [current, setCurrent] = useState<SwingSignal[] | null>(null);
   const [loadingCur, setLoadingCur] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // chart-on-result (per-symbol expand)
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [chartCache, setChartCache] = useState<Record<string, SwingChart>>({});
+  const [loadingChart, setLoadingChart] = useState<string | null>(null);
+
+  // Load universes + the last saved run on mount
+  useEffect(() => { getUniverses().then(setUniverses).catch(() => {}); }, []);
+  useEffect(() => {
+    getSwingRuns().then(async runs => {
+      if (runs?.length) {
+        const m = runs[0]; setLastRun(m); setTimeframe(m.timeframe); setLookback(m.lookback); setUniverse(m.universe);
+        try { const r = await getSwingRun(m.id); setResult(r.result); } catch {}
+      }
+    }).catch(() => {});
+  }, []);
+
   async function runBacktest() {
-    setRunning(true); setMsg(null); setStatus("Starting…"); setResult(null);
+    setRunning(true); setMsg(null); setProg({ step: "Starting…" }); setResult(null); setExpanded(null);
     try {
-      await runSwingBacktest(timeframe, lookback);
-      for (let i = 0; i < 200; i++) {
+      await runSwingBacktest(timeframe, lookback, universe);
+      for (let i = 0; i < 300; i++) {
         await new Promise(r => setTimeout(r, POLL_MS));
         const s = await getSwingStatus();
-        setStatus(s.step || s.status || "");
-        if (s.status === "completed" && s.run_id) { const r = await getSwingRun(s.run_id); setResult(r.result); break; }
+        setProg({ current: s.current, done: s.done, pending: s.pending, total: s.total, step: s.step });
+        if (s.status === "completed" && s.run_id) {
+          const r = await getSwingRun(s.run_id); setResult(r.result); setLastRun(r); break;
+        }
         if (s.status === "failed") { setMsg("Backtest failed: " + (s.message || "")); break; }
       }
     } catch (e: any) {
       setMsg("Error: " + (e?.message || "failed").replace(/^API \d+:\s*/, ""));
-    } finally { setRunning(false); setStatus(""); }
+    } finally { setRunning(false); setProg(null); }
   }
 
   async function findCurrent() {
     setLoadingCur(true); setMsg(null);
-    try { setCurrent(await getSwingCurrent(timeframe, lookback)); }
+    try { setCurrent(await getSwingCurrent(timeframe, lookback, universe)); }
     catch (e: any) { setMsg("Error: " + (e?.message || "failed").replace(/^API \d+:\s*/, "")); }
     finally { setLoadingCur(false); }
   }
 
+  async function toggleChart(sym: string) {
+    if (expanded === sym) { setExpanded(null); return; }
+    setExpanded(sym);
+    if (chartCache[sym]) return;
+    setLoadingChart(sym);
+    try { const c = await getSwingChart(sym, timeframe, lookback); setChartCache(p => ({ ...p, [sym]: c })); }
+    catch {} finally { setLoadingChart(null); }
+  }
+
   const o = result?.overall;
+  const universeLabel = universes.find(u => u.key === universe)?.label ?? universe;
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold text-white flex items-center gap-2"><TrendingUp size={20} className="text-brand-500" /> Swing Trading</h1>
         <p className="text-sm text-gray-400 mt-0.5">
-          Donchian channel breakout — long-only. Enter on a {lookback}-bar high breakout, exit on a {lookback}-bar low.
-          NIFTY 500 universe (≈ market cap &gt; ₹5000cr).
+          Donchian channel breakout — long-only. Enter on a {lookback}-bar high, exit on a {lookback}-bar low.
+          {lastRun && <span className="text-gray-500"> · Last run: {universeLabel} {lastRun.timeframe} (LB {lastRun.lookback})</span>}
         </p>
       </div>
 
@@ -95,7 +128,7 @@ export default function SwingPage() {
       <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
         {(["backtest", "current"] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-sm capitalize ${tab === t ? "bg-brand-600 text-white" : "text-gray-400 hover:text-white"}`}>
+            className={`px-4 py-1.5 rounded-lg text-sm ${tab === t ? "bg-brand-600 text-white" : "text-gray-400 hover:text-white"}`}>
             {t === "backtest" ? "Backtest" : "Current entries"}
           </button>
         ))}
@@ -111,12 +144,17 @@ export default function SwingPage() {
             </button>
           ))}
         </div>
+        <select value={universe} onChange={e => setUniverse(e.target.value)} title="Stock universe"
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white">
+          {(universes.length ? universes : [{ key: "nifty500", label: "NIFTY 500", count: 0 }]).map(u => (
+            <option key={u.key} value={u.key}>{u.label}{u.count ? ` (${u.count})` : ""}</option>
+          ))}
+        </select>
         <label className="flex items-center gap-2 text-sm text-gray-400">
           Lookback
           <input type="number" min={2} max={200} value={lookback}
             onChange={e => setLookback(Math.max(2, Math.min(200, Number(e.target.value) || 22)))}
             className="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-white" />
-          <span className="text-gray-600">bars</span>
         </label>
         {tab === "backtest" ? (
           <button onClick={runBacktest} disabled={running}
@@ -129,8 +167,20 @@ export default function SwingPage() {
             {loadingCur ? <><RefreshCw size={15} className="animate-spin" /> Scanning…</> : <><Activity size={15} /> Find entries</>}
           </button>
         )}
-        <span className="ml-auto text-xs text-gray-500">{running && status ? status : ""}</span>
       </div>
+
+      {/* Live scan progress */}
+      {running && prog && (
+        <div className="flex items-center gap-3 p-3 bg-brand-900/30 border border-brand-700/40 rounded-lg text-sm text-brand-200">
+          <RefreshCw size={14} className="animate-spin shrink-0" />
+          <span>Scanning <b className="text-white">{prog.current ?? "…"}</b></span>
+          {prog.total ? (
+            <span className="ml-auto text-xs text-gray-300">
+              <span className="text-green-300">{prog.done ?? 0} done</span> · <span className="text-amber-300">{prog.pending ?? 0} pending</span> · {prog.total} total
+            </span>
+          ) : <span className="ml-auto text-xs text-gray-400">{prog.step}</span>}
+        </div>
+      )}
 
       {msg && <div className={`text-xs px-3 py-2 rounded-lg ${msg.startsWith("Error") ? "bg-red-950/40 text-red-300" : "bg-green-950/40 text-green-300"}`}>{msg}</div>}
 
@@ -148,24 +198,37 @@ export default function SwingPage() {
 
           {result!.equity_curve.length > 1 && <EquityCurve pts={result!.equity_curve} />}
 
-          {/* Top symbols */}
+          {/* Top symbols — click to view chart */}
           <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
-            <div className="px-4 py-2 text-xs uppercase tracking-wider text-gray-500 border-b border-gray-800">Top symbols by net %</div>
+            <div className="px-4 py-2 text-xs uppercase tracking-wider text-gray-500 border-b border-gray-800">Top symbols by net % — click a row to view the chart</div>
             <table className="w-full text-sm">
               <thead className="text-gray-400 text-xs border-b border-gray-800">
-                <tr><th className="px-3 py-2 text-left">Symbol</th><th className="px-3 py-2 text-right">Trades</th><th className="px-3 py-2 text-right">Win%</th><th className="px-3 py-2 text-right">Net%</th><th className="px-3 py-2 text-right">Exp%</th><th className="px-3 py-2 text-right">Avg hold</th></tr>
+                <tr><th className="w-6 px-2 py-2" /><th className="px-3 py-2 text-left">Symbol</th><th className="px-3 py-2 text-right">Trades</th><th className="px-3 py-2 text-right">Win%</th><th className="px-3 py-2 text-right">Net%</th><th className="px-3 py-2 text-right">Exp%</th><th className="px-3 py-2 text-right">Avg hold</th></tr>
               </thead>
               <tbody>
-                {result!.per_symbol.slice(0, 25).map(s => (
-                  <tr key={s.symbol} className="border-b border-gray-800/60">
-                    <td className="px-3 py-2 font-medium text-white">{clean(s.symbol)}</td>
-                    <td className="px-3 py-2 text-right text-gray-300">{s.trades}</td>
-                    <td className="px-3 py-2 text-right text-gray-300">{s.win_rate}%</td>
-                    <td className={`px-3 py-2 text-right font-mono ${pnlColor(s.net_pct)}`}>{s.net_pct}%</td>
-                    <td className={`px-3 py-2 text-right font-mono ${pnlColor(s.expectancy)}`}>{s.expectancy}%</td>
-                    <td className="px-3 py-2 text-right text-gray-400">{s.avg_bars}</td>
-                  </tr>
-                ))}
+                {result!.per_symbol.slice(0, 50).map(s => {
+                  const isOpen = expanded === s.symbol;
+                  const ch = chartCache[s.symbol];
+                  return [
+                    <tr key={s.symbol} onClick={() => toggleChart(s.symbol)} className="border-b border-gray-800/60 hover:bg-gray-800/40 cursor-pointer">
+                      <td className="px-2 py-2 text-gray-500">{loadingChart === s.symbol ? <RefreshCw size={12} className="animate-spin" /> : isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
+                      <td className="px-3 py-2 font-medium text-white">{clean(s.symbol)}</td>
+                      <td className="px-3 py-2 text-right text-gray-300">{s.trades}</td>
+                      <td className="px-3 py-2 text-right text-gray-300">{s.win_rate}%</td>
+                      <td className={`px-3 py-2 text-right font-mono ${pnlColor(s.net_pct)}`}>{s.net_pct}%</td>
+                      <td className={`px-3 py-2 text-right font-mono ${pnlColor(s.expectancy)}`}>{s.expectancy}%</td>
+                      <td className="px-3 py-2 text-right text-gray-400">{s.avg_bars}</td>
+                    </tr>,
+                    isOpen && (
+                      <tr key={`${s.symbol}-c`} className="bg-gray-950 border-b border-gray-800">
+                        <td colSpan={7} className="px-4 py-3">
+                          {ch ? <PatternShapeChart candles={ch.candles} shapes={ch.shapes} height={340} focusDate={ch.focus_date ?? undefined} />
+                            : <div className="text-gray-500 text-sm py-6 text-center">Loading chart…</div>}
+                        </td>
+                      </tr>
+                    ),
+                  ].filter(Boolean);
+                })}
               </tbody>
             </table>
           </div>
@@ -198,7 +261,7 @@ export default function SwingPage() {
         </div>
       )}
       {tab === "backtest" && !o && !running && (
-        <div className="text-center py-12 text-gray-500">Pick a timeframe + lookback and click <span className="text-white">Run Backtest</span>.</div>
+        <div className="text-center py-12 text-gray-500">Pick timeframe + universe + lookback and click <span className="text-white">Run Backtest</span>.</div>
       )}
 
       {/* CURRENT TAB */}

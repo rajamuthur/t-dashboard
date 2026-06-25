@@ -34,9 +34,10 @@ _NSE_HEADERS = {
 UNIVERSES: dict[str, tuple[str, str | None]] = {
     "fo":       ("F&O", None),
     "nifty50":  ("NIFTY 50", "ind_nifty50list.csv"),
-    "nifty100": ("NIFTY 100", "ind_nifty100list.csv"),
+    "nifty100": ("Large Cap (NIFTY 100)", "ind_nifty100list.csv"),
     "nifty500": ("NIFTY 500", "ind_nifty500list.csv"),
-    "midcap":   ("NIFTY Midcap 150", "ind_niftymidcap150list.csv"),
+    "midcap":   ("Midcap (NIFTY 150)", "ind_niftymidcap150list.csv"),
+    "bank":     ("Bank (NIFTY Bank)", "ind_niftybanklist.csv"),
 }
 DEFAULT_UNIVERSE = "fo"
 

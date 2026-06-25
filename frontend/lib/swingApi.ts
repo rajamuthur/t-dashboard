@@ -28,12 +28,23 @@ export interface SwingResult {
   overall: SwingOverall; per_symbol: SwingPerSymbol[];
   equity_curve: { date: string; cum_pct: number }[]; trades: SwingTrade[]; symbols_with_trades: number;
 }
-export interface SwingStatus { status?: string; step?: string; run_id?: number; total?: number; message?: string; overall?: SwingOverall; }
+export interface SwingStatus {
+  status?: string; step?: string; run_id?: number; message?: string; overall?: SwingOverall;
+  current?: string; done?: number; pending?: number; total?: number;
+}
 export interface SwingSignal { symbol: string; entry: number; date: string; upper: number; stop: number; }
+export interface SwingRunMeta { id: number; timeframe: SwingTf; lookback: number; universe: string; created_at: string; }
+export interface SwingChart {
+  candles: { date: string; open: number; high: number; low: number; close: number; volume: number }[];
+  shapes: any[]; focus_date: string | null;
+}
 
-export const runSwingBacktest = (timeframe: SwingTf, lookback: number) =>
-  call<{ status: string }>(`/swing/backtest?timeframe=${timeframe}&lookback=${lookback}`, { method: "POST" });
+export const runSwingBacktest = (timeframe: SwingTf, lookback: number, universe = "nifty500") =>
+  call<{ status: string }>(`/swing/backtest?timeframe=${timeframe}&lookback=${lookback}&universe=${universe}`, { method: "POST" });
 export const getSwingStatus = () => call<SwingStatus>("/swing/status");
-export const getSwingRun = (id: number) => call<{ result: SwingResult }>(`/swing/runs/${id}`);
-export const getSwingCurrent = (timeframe: SwingTf, lookback: number) =>
-  call<SwingSignal[]>(`/swing/current?timeframe=${timeframe}&lookback=${lookback}`);
+export const getSwingRun = (id: number) => call<{ result: SwingResult } & SwingRunMeta>(`/swing/runs/${id}`);
+export const getSwingRuns = () => call<SwingRunMeta[]>("/swing/runs?limit=1");
+export const getSwingCurrent = (timeframe: SwingTf, lookback: number, universe = "nifty500") =>
+  call<SwingSignal[]>(`/swing/current?timeframe=${timeframe}&lookback=${lookback}&universe=${universe}`);
+export const getSwingChart = (symbol: string, timeframe: SwingTf, lookback: number) =>
+  call<SwingChart>(`/swing/chart?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&lookback=${lookback}`);

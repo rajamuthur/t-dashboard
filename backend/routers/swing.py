@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from ..auth import get_current_user
 from ..db import get_db
-from ..swing_backtest import run_swing_backtest, get_swing_status, current_signals
+from ..swing_backtest import run_swing_backtest, get_swing_status, current_signals, chart_data
 
 router = APIRouter(prefix="/swing", tags=["swing"])
 
@@ -42,6 +42,18 @@ async def current(
     if timeframe not in _TF:
         raise HTTPException(400, f"Unsupported timeframe: {timeframe}")
     return await current_signals(timeframe, lookback, universe)
+
+
+@router.get("/chart")
+async def chart(
+    symbol: str = Query(...),
+    timeframe: str = Query(default="day"),
+    lookback: int = Query(default=22, ge=2, le=200),
+    _: str = Depends(get_current_user),
+):
+    if timeframe not in _TF:
+        raise HTTPException(400, f"Unsupported timeframe: {timeframe}")
+    return await chart_data(symbol, timeframe, lookback)
 
 
 @router.get("/runs/{run_id}")

@@ -63,6 +63,10 @@ def _run_sync(stocks, timeframe, lookback, cost_pct, status) -> dict:
     total = len(stocks)
     for i, sym in enumerate(stocks):
         status["step"] = f"{sym} ({i + 1}/{total})"
+        status["current"] = sym.replace("NSE:", "").replace("-EQ", "")
+        status["done"] = i
+        status["pending"] = total - i
+        status["total"] = total
         df = _load(con, sym, timeframe)
         if len(df) <= lookback + 2:
             continue
@@ -141,3 +145,33 @@ def _current_sync(stocks, timeframe, lookback) -> list[dict]:
 async def current_signals(timeframe: str = "day", lookback: int = 22, universe: str = "nifty500") -> list[dict]:
     stocks = await get_universe_stocks(universe)
     return await asyncio.to_thread(_current_sync, stocks, timeframe, lookback)
+
+
+def _chart_sync(symbol: str, timeframe: str, lookback: int) -> dict:
+    con = sqlite3.connect(_get_db_path())
+    df = _load(con, symbol, timeframe)
+    con.close()
+    if df.empty:
+        return {"candles": [], "shapes": [], "focus_date": None}
+    candles = [{"date": str(i), "open": r.open, "high": r.high, "low": r.low, "close": r.close, "volume": r.volume}
+               for i, r in df.iterrows()]
+    h = df["high"].to_numpy(float); l = df["low"].to_numpy(float)
+    dates = [str(x) for x in df.index]
+    upper = [{"date": dates[i], "price": round(float(h[i - lookback:i].max()), 2)} for i in range(lookback, len(df))]
+    lower = [{"date": dates[i], "price": round(float(l[i - lookback:i].min()), 2)} for i in range(lookback, len(df))]
+    shapes: list[dict] = [
+        {"type": "polyline", "color": "#3b82f6", "label": f"Upper ({lookback})", "points": upper},
+        {"type": "polyline", "color": "#ef4444", "label": f"Lower ({lookback})", "points": lower},
+    ]
+    trades = donchian_backtest(df, lookback)
+    for t in trades:
+        shapes.append({"type": "marker", "date": t["entry_date"], "price": t["entry"], "color": "#22c55e", "position": "belowBar", "text": "E"})
+        if t["outcome"] != "open":
+            shapes.append({"type": "marker", "date": t["exit_date"], "price": t["exit"],
+                           "color": "#ef4444" if t["outcome"] == "loss" else "#3b82f6", "position": "aboveBar", "text": "X"})
+    focus = trades[-1]["entry_date"] if trades else dates[-1][:10]
+    return {"candles": candles, "shapes": shapes, "focus_date": focus}
+
+
+async def chart_data(symbol: str, timeframe: str = "day", lookback: int = 22) -> dict:
+    return await asyncio.to_thread(_chart_sync, symbol, timeframe, lookback)

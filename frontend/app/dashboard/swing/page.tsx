@@ -269,24 +269,37 @@ export default function SwingPage() {
         <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-gray-400 text-xs border-b border-gray-800">
-              <tr><th className="px-3 py-2 text-left">Symbol</th><th className="px-3 py-2 text-right">Entry (close)</th><th className="px-3 py-2 text-right">Breakout level</th><th className="px-3 py-2 text-right">Stop (lower band)</th><th className="px-3 py-2 text-left">Date</th></tr>
+              <tr><th className="w-6 px-2 py-2" /><th className="px-3 py-2 text-left">Symbol</th><th className="px-3 py-2 text-right">Entry (close)</th><th className="px-3 py-2 text-right">Breakout level</th><th className="px-3 py-2 text-right">Stop (lower band)</th><th className="px-3 py-2 text-left">Date</th></tr>
             </thead>
             <tbody>
-              {loadingCur && <tr><td colSpan={5} className="text-center py-10 text-gray-500">Scanning…</td></tr>}
-              {!loadingCur && current && current.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-gray-500">No fresh breakout entries on the latest {timeframe} bar.</td></tr>}
-              {!loadingCur && current == null && <tr><td colSpan={5} className="text-center py-10 text-gray-500">Click <span className="text-white">Find entries</span> to scan for fresh breakouts.</td></tr>}
-              {!loadingCur && (current ?? []).map(s => (
-                <tr key={s.symbol} className="border-b border-gray-800/60">
-                  <td className="px-3 py-2 font-medium text-white">{clean(s.symbol)}</td>
-                  <td className="px-3 py-2 text-right font-mono text-emerald-300">{s.entry}</td>
-                  <td className="px-3 py-2 text-right font-mono text-gray-300">{s.upper}</td>
-                  <td className="px-3 py-2 text-right font-mono text-red-300">{s.stop}</td>
-                  <td className="px-3 py-2 text-gray-400">{s.date}</td>
-                </tr>
-              ))}
+              {loadingCur && <tr><td colSpan={6} className="text-center py-10 text-gray-500">Scanning…</td></tr>}
+              {!loadingCur && current && current.length === 0 && <tr><td colSpan={6} className="text-center py-10 text-gray-500">No fresh breakout entries on the latest {timeframe} bar.</td></tr>}
+              {!loadingCur && current == null && <tr><td colSpan={6} className="text-center py-10 text-gray-500">Click <span className="text-white">Find entries</span> to scan for fresh breakouts.</td></tr>}
+              {!loadingCur && (current ?? []).map(s => {
+                const isOpen = expanded === s.symbol;
+                const ch = chartCache[s.symbol];
+                return [
+                  <tr key={s.symbol} onClick={() => toggleChart(s.symbol)} className="border-b border-gray-800/60 hover:bg-gray-800/40 cursor-pointer">
+                    <td className="px-2 py-2 text-gray-500">{loadingChart === s.symbol ? <RefreshCw size={12} className="animate-spin" /> : isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
+                    <td className="px-3 py-2 font-medium text-white">{clean(s.symbol)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-emerald-300">{s.entry}</td>
+                    <td className="px-3 py-2 text-right font-mono text-gray-300">{s.upper}</td>
+                    <td className="px-3 py-2 text-right font-mono text-red-300">{s.stop}</td>
+                    <td className="px-3 py-2 text-gray-400">{s.date}</td>
+                  </tr>,
+                  isOpen && (
+                    <tr key={`${s.symbol}-c`} className="bg-gray-950 border-b border-gray-800">
+                      <td colSpan={6} className="px-4 py-3">
+                        {ch ? <PatternShapeChart candles={ch.candles} shapes={ch.shapes} height={340} focusDate={ch.focus_date ?? undefined} />
+                          : <div className="text-gray-500 text-sm py-6 text-center">Loading chart…</div>}
+                      </td>
+                    </tr>
+                  ),
+                ].filter(Boolean);
+              })}
             </tbody>
           </table>
-          {current && current.length > 0 && <div className="px-3 py-2 text-xs text-gray-500 border-t border-gray-800">{current.length} fresh entr{current.length === 1 ? "y" : "ies"} on the latest {timeframe} bar.</div>}
+          {current && current.length > 0 && <div className="px-3 py-2 text-xs text-gray-500 border-t border-gray-800">{current.length} fresh entr{current.length === 1 ? "y" : "ies"} on the latest {timeframe} bar — click a row to view its chart.</div>}
         </div>
       )}
     </div>

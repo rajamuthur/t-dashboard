@@ -26,8 +26,8 @@ export interface FutStatus {
 export interface FutMatch { id: number; ts: string; day: string; underlying: string; month: string; action: string; kind: string; spot: number; future: number; premium: number; }
 export interface FutChart { candles: any[]; shapes: any[]; focus_date: string | null; }
 
-export const runFuturesScan = (threshold: number, curveTol: number, alert = true) =>
-  call<{ status: string }>(`/futures/scan?threshold=${threshold}&curve_tol=${curveTol}&alert=${alert}`, { method: "POST" });
+export const runFuturesScan = (threshold: number, curveTol: number, alert = true, auto = false) =>
+  call<{ status: string }>(`/futures/scan?threshold=${threshold}&curve_tol=${curveTol}&alert=${alert}&auto=${auto}`, { method: "POST" });
 export const getFuturesStatus = () => call<FutStatus>("/futures/status");
 export const getFuturesResult = () => call<FutResult>("/futures/result");
 export const getFuturesHistory = (limit = 100) => call<FutMatch[]>(`/futures/history?limit=${limit}`);

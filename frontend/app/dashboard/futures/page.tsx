@@ -48,22 +48,23 @@ export default function FuturesPage() {
 
   const runRef = useRef<() => void>(() => {});
 
-  async function runScan() {
+  async function runScan(isAuto = false) {
     if (running) return;
     setRunning(true); setMsg(null); setStatus({ status: "running", step: "Starting…" });
     try {
-      await runFuturesScan(threshold, curveTol, true);
+      await runFuturesScan(threshold, curveTol, true, isAuto);
       for (let i = 0; i < 120; i++) {
         await new Promise(r => setTimeout(r, 2000));
         const s = await getFuturesStatus(); setStatus(s);
         if (s.status === "completed") { setResult(await getFuturesResult()); getFuturesHistory().then(setHistory).catch(() => {}); break; }
-        if (s.status === "failed") { setMsg(s.message || "Scan failed" + (s.token === false ? " — re-login in Settings → Broker" : "")); break; }
+        if (s.status === "market_closed") break;   // auto cycle skipped — shown via status, not an error
+        if (s.status === "failed") { setMsg((s.message || "Scan failed") + (s.token === false ? " — re-login in Settings → Broker" : "")); break; }
       }
     } catch (e: any) {
       setMsg("Error: " + (e?.message || "failed").replace(/^API \d+:\s*/, ""));
     } finally { setRunning(false); setNextAt(Date.now() + AUTO_MS); }
   }
-  runRef.current = runScan;
+  runRef.current = () => runScan(true);
 
   // Initial load: last result + history
   useEffect(() => {
@@ -94,6 +95,7 @@ export default function FuturesPage() {
   const rows = (result?.rows ?? []).filter(r => !flaggedOnly || r.flagged);
   const countdown = auto && nextAt ? Math.max(0, Math.floor((nextAt - now) / 1000)) : null;
   const mmss = countdown != null ? `${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, "0")}` : null;
+  const marketClosed = status?.status === "market_closed";
 
   return (
     <div className="space-y-5">
@@ -105,7 +107,7 @@ export default function FuturesPage() {
             {result?.at && <span className="text-gray-500"> · Last: {new Date(result.at).toLocaleString("en-IN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "short" })}</span>}
           </p>
         </div>
-        {auto && <div className="text-right text-xs text-gray-400 shrink-0">{running ? <span className="text-brand-300">scanning…</span> : mmss ? <>next in <b className="text-white font-mono">{mmss}</b></> : null}</div>}
+        {auto && <div className="text-right text-xs shrink-0">{running ? <span className="text-brand-300">scanning…</span> : marketClosed ? <span className="text-amber-300">market closed{mmss ? <> · retry {mmss}</> : null}</span> : mmss ? <span className="text-gray-400">next in <b className="text-white font-mono">{mmss}</b></span> : null}</div>}
       </div>
 
       {/* Controls */}
@@ -120,7 +122,7 @@ export default function FuturesPage() {
           className={`px-3 py-1.5 rounded-lg text-sm border ${auto ? "bg-green-600/20 border-green-600/50 text-green-300" : "bg-gray-800 border-gray-700 text-gray-300"}`}>
           Auto-refresh {auto ? "ON (5m)" : "OFF"}
         </button>
-        <button onClick={runScan} disabled={running}
+        <button onClick={() => runScan(false)} disabled={running}
           className="flex items-center gap-2 px-4 py-1.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-50 rounded-lg text-sm font-medium text-white">
           {running ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} Re-run
         </button>
@@ -133,6 +135,11 @@ export default function FuturesPage() {
         <div className="flex items-center gap-3 p-2.5 bg-brand-900/30 border border-brand-700/40 rounded-lg text-xs text-brand-200">
           <RefreshCw size={13} className="animate-spin" /><span>{status.current ? `Scanning ${status.current}` : status.step}</span>
           {status.total ? <span className="ml-auto text-gray-400">{status.done ?? 0}/{status.total}</span> : null}
+        </div>
+      )}
+      {!running && marketClosed && (
+        <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-amber-950/40 text-amber-300">
+          <AlertTriangle size={13} /> {status?.message || "Market closed"} — auto-scan paused; resumes automatically at 09:15 IST. Use Re-run for an end-of-day snapshot.
         </div>
       )}
       {msg && <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-red-950/40 text-red-300"><AlertTriangle size={13} /> {msg}</div>}

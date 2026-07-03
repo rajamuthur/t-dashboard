@@ -14,9 +14,10 @@ async def scan(
     curve_tol: float = Query(default=1.5, ge=0.1, le=50.0),
     months: int = Query(default=3, ge=2, le=6),
     alert: bool = Query(default=True),
+    auto: bool = Query(default=False),
     _: str = Depends(get_current_user),
 ):
-    background_tasks.add_task(run_scan, threshold, curve_tol, months, alert)
+    background_tasks.add_task(run_scan, threshold, curve_tol, months, alert, auto)
     return {"status": "started", "threshold": threshold, "curve_tol": curve_tol}
 
 

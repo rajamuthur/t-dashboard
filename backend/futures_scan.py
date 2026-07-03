@@ -19,7 +19,7 @@ Telegram (deduped so a persisting mispricing isn't re-sent); an expired Fyers
 token pushes an alert every run.
 """
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import aiosqlite
 
@@ -31,6 +31,23 @@ INDEX_SPOT = {
     "FINNIFTY": "NSE:FINNIFTY-INDEX", "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX",
 }
 _NEAR_EXPIRY_DAYS = 7
+# NSE normal session (equity + F&O). India has no DST, so IST = UTC + 5:30.
+_MARKET_OPEN = time(9, 15)
+_MARKET_CLOSE = time(15, 30)
+
+
+async def market_open() -> tuple[bool, str]:
+    """Is the NSE cash/F&O market open right now? Open = a trading day (Mon–Fri,
+    not an NSE holiday) within 09:15–15:30 IST. Used to skip auto-scan cycles
+    outside market hours."""
+    ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+    from .routers.holidays import get_holiday_set, is_trading_day
+    holidays = await get_holiday_set()
+    if not is_trading_day(ist.date(), holidays):
+        return False, "Market closed — weekend/holiday"
+    if not (_MARKET_OPEN <= ist.time() <= _MARKET_CLOSE):
+        return False, "Market closed — outside 09:15–15:30 IST"
+    return True, "open"
 
 _status: dict = {}
 _result: dict = {"rows": [], "at": None, "params": {}}
@@ -184,8 +201,17 @@ async def _log_and_alert(rows: list[dict]) -> int:
     return len(new_matches)
 
 
-async def run_scan(threshold: float = 5.0, curve_tol: float = 1.5, months: int = 3, alert: bool = True) -> dict:
+async def run_scan(threshold: float = 5.0, curve_tol: float = 1.5, months: int = 3,
+                   alert: bool = True, auto: bool = False) -> dict:
     global _status, _result
+    # Auto (5-min) cycles are a no-op when the market is closed — no quotes, no
+    # token check, no Telegram. Manual re-runs (auto=False) still run so you can
+    # inspect the EOD basis after close.
+    if auto:
+        is_open, reason = await market_open()
+        if not is_open:
+            _status = {"status": "market_closed", "message": reason}
+            return _status
     _status = {"status": "running", "step": "Checking token…"}
     from .fyers_auth import token_status
     tok = await asyncio.to_thread(token_status)

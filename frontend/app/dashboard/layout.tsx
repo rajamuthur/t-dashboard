@@ -59,7 +59,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <FyersTokenBadge />
         </div>
 
-        <nav className="flex-1 py-4 space-y-1 px-2">
+        <nav className="flex-1 min-h-0 overflow-y-auto py-4 space-y-1 px-2">
           {/* Top nav items */}
           {TOP_NAV.slice(0, 1).map(({ href, label, icon: Icon }) => (
             <Link key={href} href={href}

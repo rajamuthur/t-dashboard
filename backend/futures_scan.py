@@ -4,8 +4,14 @@ Futures basis / mispricing scanner.
 For every F&O underlying (+ NIFTY / BANKNIFTY), pull spot + the next 3 monthly
 future LTPs (Fyers), compute each contract's premium vs spot, and flag:
   - RICH / CHEAP vs spot   : |premium| >= threshold%  (default 5)
-  - OFF-CURVE              : a month off the line implied by the other contracts
-                            by >= curve_tol% (default 1.5) — the true "odd one out"
+  - OFF-CURVE              : a month that's a local extremum — below BOTH its
+                            neighbour months (a dip → BUY) or above BOTH (a spike
+                            → SHORT) by >= curve_tol% (default 1.5). A month lying
+                            *between* its neighbours is a normal (even steep)
+                            carry curve and is never flagged.
+
+Stale/illiquid contracts (0 traded volume today) are dropped before flagging so a
+carried-over LTP can't produce a phantom premium or corrupt a neighbour's curve.
 
 Focus = the front two contracts, rolling to the next two when the near month is
 within ~7 days of expiry. On each run, NEW matches are logged + pushed to
@@ -49,32 +55,39 @@ def _month_label(expiry: str) -> str:
         return expiry
 
 
-def _residuals(contracts: list[dict]) -> dict:
-    """Off-curve residual per contract: how far a month's premium sits from the
-    straight line between its two neighbours (consecutive monthlies are evenly
-    spaced, so expected = mean of the neighbours). Only interior months have both
-    neighbours; this isolates the true 'odd one out' (e.g. a cheap middle month)
-    without an outlier dragging a global fit."""
-    resid = {}
+def _off_curve(contracts: list[dict], curve_tol: float) -> dict:
+    """Off-curve months as *local extrema*. A month is off the carry curve only
+    when its premium sits outside the band set by BOTH neighbours by >= curve_tol:
+    below both (a dip → CHEAP/BUY) or above both (a spike → SHORT). Only interior
+    months have both neighbours.
+
+    Why not the distance from the neighbour-average line: when a far, illiquid
+    month has an off quote, that average tilts and a perfectly normal middle
+    month (one that lies *between* its neighbours — ordinary contango) looks off
+    the line. Requiring a true local extremum flags the genuinely odd month and
+    leaves a monotonic carry curve alone, however steep."""
+    out = {}
     prem = [c["premium"] for c in contracts]
     for i in range(1, len(contracts) - 1):
-        if prem[i] is None or prem[i - 1] is None or prem[i + 1] is None:
+        p, prev, nxt = prem[i], prem[i - 1], prem[i + 1]
+        if p is None or prev is None or nxt is None:
             continue
-        resid[i] = prem[i] - (prem[i - 1] + prem[i + 1]) / 2
-    return resid
+        if p <= prev - curve_tol and p <= nxt - curve_tol:
+            out[i] = "BELOW"   # local minimum → underpriced
+        elif p >= prev + curve_tol and p >= nxt + curve_tol:
+            out[i] = "ABOVE"   # local maximum → overpriced
+    return out
 
 
 def _apply_flags(contracts: list[dict], focus_idx: list[int], threshold: float, curve_tol: float):
-    resid = _residuals(contracts)
+    curve = _off_curve(contracts, curve_tol)
     for i, c in enumerate(contracts):
         c["vs_spot"] = None; c["curve"] = None; c["action"] = None; c["focus"] = i in focus_idx
         if c["premium"] is None or i not in focus_idx:
             continue
         if abs(c["premium"]) >= threshold:
             c["vs_spot"] = "RICH" if c["premium"] > 0 else "CHEAP"
-        r = resid.get(i)
-        if r is not None and abs(r) >= curve_tol:
-            c["curve"] = "ABOVE" if r > 0 else "BELOW"
+        c["curve"] = curve.get(i)
         if c["vs_spot"] == "CHEAP" or c["curve"] == "BELOW":
             c["action"] = "BUY"     # underpriced → buy, expect reversion up
         elif c["vs_spot"] == "RICH" or c["curve"] == "ABOVE":
@@ -108,12 +121,17 @@ def _scan_sync(threshold: float, curve_tol: float, months: int, status: dict) ->
     rows = []
     for k, (u, spot_sym, cs) in enumerate(plan):
         status["done"] = k + 1; status["current"] = u
-        spot = quotes.get(spot_sym)
+        sq = quotes.get(spot_sym)
+        spot = sq["lp"] if sq else None   # spot is always the liquid index/equity — no volume filter
         if not spot or spot <= 0:
             continue
         contracts = []
         for c in cs:
-            price = quotes.get(c["symbol"])
+            q = quotes.get(c["symbol"])
+            # Drop stale/illiquid futures: a contract that hasn't traded today
+            # (volume 0) carries a stale LTP that yields a phantom premium and
+            # corrupts a neighbour's curve. Treat it as no-quote.
+            price = q["lp"] if (q and q["lp"] and q["volume"] > 0) else None
             prem = round((price - spot) / spot * 100, 2) if price else None
             contracts.append({"month": _month_label(c["expiry"]), "symbol": c["symbol"], "expiry": c["expiry"],
                               "epoch": c["epoch"], "price": round(price, 2) if price else None, "premium": prem})

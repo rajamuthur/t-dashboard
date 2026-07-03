@@ -104,7 +104,10 @@ class FyersDownloader:
         return None
 
     def quotes_batch(self, symbols: list, _retried: bool = False) -> dict:
-        """LTP for many symbols → {symbol: ltp}. Batches ≤50 per Fyers call."""
+        """Live quote for many symbols → {symbol: {"lp": float, "volume": float}}.
+        Batches ≤50 per Fyers call. `volume` is today's traded volume — 0 means
+        the contract hasn't traded and its LTP is a stale carry-over, so callers
+        can drop illiquid quotes."""
         out: dict = {}
         for i in range(0, len(symbols), 50):
             chunk = symbols[i:i + 50]
@@ -117,7 +120,7 @@ class FyersDownloader:
                     n = item.get("n"); v = item.get("v", {}) or {}
                     lp = v.get("lp") or v.get("last_price")
                     if n and lp:
-                        out[n] = float(lp)
+                        out[n] = {"lp": float(lp), "volume": float(v.get("volume") or 0)}
         return out
 
     @staticmethod

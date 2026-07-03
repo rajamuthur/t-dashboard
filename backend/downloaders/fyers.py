@@ -103,6 +103,23 @@ class FyersDownloader:
             return float(lp) if lp else None
         return None
 
+    def quotes_batch(self, symbols: list, _retried: bool = False) -> dict:
+        """LTP for many symbols → {symbol: ltp}. Batches ≤50 per Fyers call."""
+        out: dict = {}
+        for i in range(0, len(symbols), 50):
+            chunk = symbols[i:i + 50]
+            resp = self._fyers.quotes({"symbols": ",".join(chunk)})
+            if isinstance(resp, dict) and resp.get("s") == "error" and not _retried:
+                if self._try_refresh():
+                    return self.quotes_batch(symbols, _retried=True)
+            if isinstance(resp, dict) and resp.get("d"):
+                for item in resp["d"]:
+                    n = item.get("n"); v = item.get("v", {}) or {}
+                    lp = v.get("lp") or v.get("last_price")
+                    if n and lp:
+                        out[n] = float(lp)
+        return out
+
     @staticmethod
     def resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
         return df.resample("W-FRI").agg(

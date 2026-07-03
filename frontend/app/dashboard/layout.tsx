@@ -6,7 +6,7 @@ import { isLoggedIn, clearToken } from "@/lib/auth";
 import FyersTokenBadge from "@/components/FyersTokenBadge";
 import {
   LayoutDashboard, TrendingUp, Calendar,
-  CandlestickChart, Settings, LogOut, ChevronDown, BarChart2, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen, Shapes, Target, FlaskConical,
+  CandlestickChart, Settings, LogOut, ChevronDown, BarChart2, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen, Shapes, Target, FlaskConical, Scale,
 } from "lucide-react";
 
 const ANALYSIS_ITEMS = [
@@ -23,6 +23,7 @@ const TOP_NAV = [
   { href: "/dashboard/patterns",     label: "Patterns",     icon: Shapes },
   { href: "/dashboard/vcp",          label: "VCP Scanner",  icon: Target },
   { href: "/dashboard/swing",        label: "Swing Trading", icon: TrendingUp },
+  { href: "/dashboard/futures",      label: "Futures Basis", icon: Scale },
   { href: "/dashboard/backtest",     label: "Backtest",     icon: FlaskConical },
   { href: "/dashboard/trades",       label: "Trades & P&L", icon: BookOpen },
   { href: "/dashboard/holidays",     label: "Holidays",     icon: CalendarDays },

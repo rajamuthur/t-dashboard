@@ -14,7 +14,7 @@ import io
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 import requests
@@ -26,10 +26,13 @@ _MAX_AGE_SEC = 24 * 3600
 
 # Column layout of NSE_FO.csv (positional, no header): see module probe.
 _COL_LOT = 3
+_COL_EXP_EPOCH = 8
 _COL_TRADING_SYMBOL = 9
 _COL_UNDERLYING = 13
 
+_FUTS_CACHE_FILE = os.path.join(_CACHE_DIR, "fo_futs.json")
 _lots: Optional[Dict[str, int]] = None     # in-process memo
+_futs: Optional[dict] = None
 
 
 def _parse_csv(text: str) -> Dict[str, int]:
@@ -57,18 +60,46 @@ def _load_cache() -> Optional[Dict[str, int]]:
     return None
 
 
-def _refresh() -> Dict[str, int]:
+def _parse_futs(text: str) -> dict:
+    """{underlying: [{symbol, epoch, expiry}...]} for FUT contracts, expiry-sorted."""
+    out: dict = {}
+    for row in csv.reader(io.StringIO(text)):
+        if len(row) <= _COL_UNDERLYING:
+            continue
+        sym = (row[_COL_TRADING_SYMBOL] or "").strip()
+        if not sym.upper().endswith("FUT"):
+            continue
+        und = (row[_COL_UNDERLYING] or "").strip().upper()
+        try:
+            epoch = int(float(row[_COL_EXP_EPOCH]))
+        except (ValueError, TypeError):
+            continue
+        if not und or epoch <= 0:
+            continue
+        out.setdefault(und, []).append(
+            {"symbol": sym, "epoch": epoch,
+             "expiry": datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%d")})
+    for und in out:
+        out[und].sort(key=lambda c: c["epoch"])
+    return out
+
+
+def _refresh() -> tuple[Dict[str, int], dict]:
     resp = requests.get(_CSV_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=40)
     resp.raise_for_status()
     lots = _parse_csv(resp.text)
-    if lots:
-        try:
-            os.makedirs(_CACHE_DIR, exist_ok=True)
+    futs = _parse_futs(resp.text)
+    try:
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        if lots:
             with open(_CACHE_FILE, "w", encoding="utf-8") as f:
                 json.dump(lots, f)
-        except Exception:
-            pass
-    return lots
+        if futs:
+            with open(_FUTS_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(futs, f)
+    except Exception:
+        pass
+    return lots, futs
 
 
 def get_lot_sizes() -> Dict[str, int]:
@@ -81,10 +112,47 @@ def get_lot_sizes() -> Dict[str, int]:
         _lots = cached
         return _lots
     try:
-        _lots = _refresh()
+        _lots = _refresh()[0]
     except Exception:
         _lots = {}
     return _lots
+
+
+def _load_futs_cache() -> Optional[dict]:
+    try:
+        if os.path.exists(_FUTS_CACHE_FILE) and (time.time() - os.path.getmtime(_FUTS_CACHE_FILE)) < _MAX_AGE_SEC:
+            with open(_FUTS_CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return None
+
+
+def get_fut_contracts() -> dict:
+    """Cached {underlying: [{symbol, epoch, expiry}...]} (sorted by expiry)."""
+    global _futs
+    if _futs is not None:
+        return _futs
+    cached = _load_futs_cache()
+    if cached:
+        _futs = cached
+        return _futs
+    try:
+        _futs = _refresh()[1]
+    except Exception:
+        _futs = {}
+    return _futs
+
+
+def next_contracts(underlying: str, n: int = 3) -> list[dict]:
+    """The next n monthly futures (expiry from today onward), soonest first."""
+    conts = get_fut_contracts().get((underlying or "").strip().upper(), [])
+    upcoming = [c for c in conts if c["epoch"] >= time.time() - 86400]
+    return upcoming[:n]
+
+
+def fut_underlyings() -> list[str]:
+    return sorted(get_fut_contracts().keys())
 
 
 def lot_size(underlying: str) -> Optional[int]:

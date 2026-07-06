@@ -25,6 +25,7 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 export type InstrumentType = "equity" | "future" | "option";
 export type Side = "buy" | "sell";
 export type OptionType = "CE" | "PE";
+export type TradeMode = "actual" | "paper";
 
 export interface Trade {
   id: number;
@@ -45,6 +46,8 @@ export interface Trade {
   current_at: string | null;
   status: "open" | "closed";
   notes: string | null;
+  mode: TradeMode;
+  rationale: string | null;
   created_at: string;
   // computed by backend on every response
   pnl: number;
@@ -65,6 +68,8 @@ export interface NewTradePayload {
   entry_price: number;
   entry_at?: string;      // YYYY-MM-DD or full ISO; backend defaults to now()
   notes?: string;
+  mode: TradeMode;
+  rationale?: string;
 }
 
 export interface TradeDashboard {
@@ -95,23 +100,30 @@ export const getLotSize = (u: string) =>
 export const getExpiries = (u: string) =>
   call<{ underlying: string; weekly: string[]; monthly: string[] }>(`/trades/expiries?underlying=${encodeURIComponent(u)}`);
 
-export const listTrades = (status?: "open" | "closed") =>
-  call<Trade[]>(`/trades${status ? `?status=${status}` : ""}`);
-export const getDashboard = () => call<TradeDashboard>("/trades/dashboard");
+export const listTrades = (status?: "open" | "closed", mode?: TradeMode) => {
+  const qs = new URLSearchParams();
+  if (status) qs.set("status", status);
+  if (mode) qs.set("mode", mode);
+  const s = qs.toString();
+  return call<Trade[]>(`/trades${s ? `?${s}` : ""}`);
+};
+export const getDashboard = (mode?: TradeMode) =>
+  call<TradeDashboard>(`/trades/dashboard${mode ? `?mode=${mode}` : ""}`);
 export const createTrade = (payload: NewTradePayload) =>
   call<Trade>("/trades", { method: "POST", body: JSON.stringify(payload) });
 export const patchTrade = (id: number, body: Partial<{
   entry_price: number; entry_at: string;
   exit_price: number; exit_at: string;
   current_price: number; status: "open" | "closed";
-  notes: string; num_lots: number; lot_size: number;
+  notes: string; rationale: string; num_lots: number; lot_size: number;
 }>) => call<Trade>(`/trades/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 export const deleteTrade = (id: number) =>
   call<void>(`/trades/${id}`, { method: "DELETE" });
 export const refreshOne = (id: number) =>
   call<Trade>(`/trades/${id}/refresh-price`, { method: "POST" });
-export const refreshAll = () =>
-  call<{ refreshed: number; skipped: number; note?: string | null }>("/trades/refresh-all", { method: "POST" });
+export const refreshAll = (mode?: TradeMode) =>
+  call<{ refreshed: number; skipped: number; note?: string | null }>(
+    `/trades/refresh-all${mode ? `?mode=${mode}` : ""}`, { method: "POST" });
 export const setFyersToken = (token: string) =>
   call<{ key: string }>("/config/fyers_token", { method: "PUT", body: JSON.stringify({ value: token.trim() }) });
 export const getFyersStatus = () =>

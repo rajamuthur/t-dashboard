@@ -23,7 +23,7 @@ _TRADE_COLS = (
     "id", "instrument_type", "underlying", "symbol", "side", "option_type",
     "strike", "expiry_date", "lot_size", "num_lots", "entry_price", "entry_at",
     "exit_price", "exit_at", "current_price", "current_at", "status", "notes",
-    "created_at",
+    "mode", "rationale", "created_at",
 )
 
 
@@ -70,6 +70,8 @@ class TradeIn(BaseModel):
     entry_price: float
     entry_at: Optional[str] = None        # ISO date or datetime; defaults to now()
     notes: Optional[str] = None
+    mode: str = Field("actual", pattern="^(actual|paper)$")   # trade book
+    rationale: Optional[str] = None       # paper-trade entry thesis
     # For equity, the underlying may be a full Yahoo symbol like RELIANCE.NS.
 
 
@@ -81,6 +83,7 @@ class TradePatch(BaseModel):
     status: Optional[str] = Field(None, pattern="^(open|closed)$")
     current_price: Optional[float] = None
     notes: Optional[str] = None
+    rationale: Optional[str] = None
     num_lots: Optional[int] = None
     lot_size: Optional[int] = None
 
@@ -157,6 +160,7 @@ async def expiries(underlying: str, _: str = Depends(get_current_user)):
 async def list_trades(
     status: Optional[str] = Query(default=None, pattern="^(open|closed)$"),
     instrument_type: Optional[str] = Query(default=None, pattern="^(equity|future|option)$"),
+    mode: Optional[str] = Query(default=None, pattern="^(actual|paper)$"),
     limit: int = Query(default=200, le=1000),
     db: aiosqlite.Connection = Depends(get_db),
     _: str = Depends(get_current_user),
@@ -168,6 +172,8 @@ async def list_trades(
         q += " AND status = ?"; p.append(status)
     if instrument_type:
         q += " AND instrument_type = ?"; p.append(instrument_type)
+    if mode:
+        q += " AND mode = ?"; p.append(mode)
     q += " ORDER BY entry_at DESC LIMIT ?"; p.append(limit)
     async with db.execute(q, p) as cur:
         rows = await cur.fetchall()
@@ -209,13 +215,13 @@ async def create_trade(
     cur = await db.execute(
         """INSERT INTO trades
            (instrument_type, underlying, symbol, side, option_type, strike, expiry_date,
-            lot_size, num_lots, entry_price, entry_at, status, notes, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)""",
+            lot_size, num_lots, entry_price, entry_at, status, notes, mode, rationale, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)""",
         [
             payload.instrument_type, underlying, symbol, payload.side,
             payload.option_type, payload.strike, payload.expiry_date,
             lot_size, payload.num_lots, payload.entry_price, entry_at,
-            payload.notes, now,
+            payload.notes, payload.mode, payload.rationale, now,
         ],
     )
     await db.commit()
@@ -260,6 +266,8 @@ async def patch_trade(
             fields += ["entry_at = ?"]; params.append(normalized)
     if payload.notes is not None:
         fields += ["notes = ?"]; params.append(payload.notes)
+    if payload.rationale is not None:
+        fields += ["rationale = ?"]; params.append(payload.rationale)
     if payload.num_lots is not None:
         fields += ["num_lots = ?"]; params.append(payload.num_lots)
     if payload.lot_size is not None:
@@ -412,13 +420,16 @@ async def fyers_status(_: str = Depends(get_current_user)):
 
 @router.post("/refresh-all")
 async def refresh_all(
+    mode: Optional[str] = Query(default=None, pattern="^(actual|paper)$"),
     db: aiosqlite.Connection = Depends(get_db),
     _: str = Depends(get_current_user),
 ):
     cols = ", ".join(_TRADE_COLS)
-    async with db.execute(
-        f"SELECT {cols} FROM trades WHERE status = 'open'"   # equity, futures AND options
-    ) as q:
+    q_sql = f"SELECT {cols} FROM trades WHERE status = 'open'"   # equity, futures AND options
+    p: list = []
+    if mode:
+        q_sql += " AND mode = ?"; p.append(mode)
+    async with db.execute(q_sql, p) as q:
         rows = await q.fetchall()
     updated = 0
     for r in rows:
@@ -436,11 +447,16 @@ async def refresh_all(
 # --------------------------------------------------------------------------
 @router.get("/dashboard")
 async def dashboard(
+    mode: Optional[str] = Query(default=None, pattern="^(actual|paper)$"),
     db: aiosqlite.Connection = Depends(get_db),
     _: str = Depends(get_current_user),
 ):
     cols = ", ".join(_TRADE_COLS)
-    async with db.execute(f"SELECT {cols} FROM trades") as q:
+    q_sql = f"SELECT {cols} FROM trades"
+    p: list = []
+    if mode:
+        q_sql += " WHERE mode = ?"; p.append(mode)
+    async with db.execute(q_sql, p) as q:
         rows = await q.fetchall()
     trades = [_row_to_dict(r) for r in rows]
     for t in trades: t.update(_pnl(t))

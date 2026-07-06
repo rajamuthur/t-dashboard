@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS trades (
     current_at      TEXT,
     status          TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'closed'
     notes           TEXT,
+    mode            TEXT NOT NULL DEFAULT 'actual', -- 'actual' | 'paper'
+    rationale       TEXT,                           -- paper-trade entry thesis ("why I'm entering")
     created_at      TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status, entry_at);
@@ -122,6 +124,9 @@ async def migrate_schema() -> None:
             ("sync_log",     "data_to",       "TEXT"),
             # Pattern scanner: sessions can be run per timeframe (day/week/month/...).
             ("daily_scan_sessions", "timeframe", "TEXT NOT NULL DEFAULT 'day'"),
+            # Paper vs actual trade book. Existing rows default to 'actual'.
+            ("trades", "mode",      "TEXT NOT NULL DEFAULT 'actual'"),
+            ("trades", "rationale", "TEXT"),
         ]:
             try:
                 await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typedef}")

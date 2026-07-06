@@ -18,6 +18,8 @@ export default function EditOpenTradeForm({ trade, onClose, onSaved }: Props) {
   const entryAtRef = useRef<HTMLInputElement>(null);
   const [currentPrice, setCurrentPrice] = useState<string>(trade.current_price != null ? String(trade.current_price) : "");
   const [notes, setNotes] = useState<string>(trade.notes ?? "");
+  const [rationale, setRationale] = useState<string>(trade.rationale ?? "");
+  const isPaper = trade.mode === "paper";
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -43,6 +45,7 @@ export default function EditOpenTradeForm({ trade, onClose, onSaved }: Props) {
         if (!Number.isNaN(cp) && cp !== trade.current_price) body.current_price = cp;
       }
       if (notes !== (trade.notes ?? "")) body.notes = notes;
+      if (isPaper && rationale !== (trade.rationale ?? "")) body.rationale = rationale;
 
       if (Object.keys(body).length === 0) { onClose(); return; }
       await patchTrade(trade.id, body);
@@ -62,7 +65,9 @@ export default function EditOpenTradeForm({ trade, onClose, onSaved }: Props) {
     >
       <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-lg shadow-2xl text-sm">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-          <h2 className="text-base font-semibold text-white">Edit open trade</h2>
+          <h2 className="text-base font-semibold text-white">
+            Edit open {isPaper ? "paper " : ""}trade
+          </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={16} /></button>
         </div>
 
@@ -149,6 +154,20 @@ export default function EditOpenTradeForm({ trade, onClose, onSaved }: Props) {
               className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-100"
             />
           </div>
+
+          {isPaper && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">
+                Why I&apos;m entering this trade <span className="text-gray-500">(thesis / setup)</span>
+              </label>
+              <textarea
+                value={rationale}
+                onChange={e => setRationale(e.target.value)}
+                rows={3}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-100 resize-y"
+              />
+            </div>
+          )}
 
           {err && <div className="text-xs text-red-400">{err}</div>}
         </div>

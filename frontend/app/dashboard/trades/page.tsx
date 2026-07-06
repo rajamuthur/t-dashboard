@@ -5,7 +5,7 @@ import NewTradeForm from "@/components/NewTradeForm";
 import EditOpenTradeForm from "@/components/EditOpenTradeForm";
 import CloseTradeForm from "@/components/CloseTradeForm";
 import {
-  Trade, TradeDashboard,
+  Trade, TradeDashboard, TradeMode,
   listTrades, getDashboard, refreshAll, refreshOne,
   deleteTrade, setFyersToken,
 } from "@/lib/tradesApi";
@@ -40,6 +40,7 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string;
 }
 
 export default function TradesPage() {
+  const [book, setBook] = useState<TradeMode>("actual");
   const [trades, setTrades] = useState<Trade[]>([]);
   const [dash, setDash] = useState<TradeDashboard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,28 +89,36 @@ export default function TradesPage() {
 
   const reload = useCallback(async () => {
     try {
-      const [t, d] = await Promise.all([listTrades(), getDashboard()]);
+      const [t, d] = await Promise.all([listTrades(undefined, book), getDashboard(book)]);
       setTrades(t);
       setDash(d);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [book]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Switching book: clear cross-book selection and show a fresh load.
+  function switchBook(b: TradeMode) {
+    if (b === book) return;
+    setSelected(new Set());
+    setLoading(true);
+    setBook(b);
+  }
 
   // Auto-refresh prices for open non-option trades every 30s, then reload data.
   useEffect(() => {
     const id = window.setInterval(async () => {
-      try { await refreshAll(); await reload(); } catch { /* silent */ }
+      try { await refreshAll(book); await reload(); } catch { /* silent */ }
     }, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [reload]);
+  }, [reload, book]);
 
   async function onRefreshAll() {
     setRefreshing(true);
     try {
-      const res = await refreshAll();
+      const res = await refreshAll(book);
       await reload();
       if (res.note) { setTokenMsg(res.note); setShowToken(true); }
       else { setTokenMsg(`Updated ${res.refreshed} live price(s).`); setShowToken(false); }
@@ -122,7 +131,7 @@ export default function TradesPage() {
     try {
       await setFyersToken(tokenInput);
       setTokenInput("");
-      const res = await refreshAll();
+      const res = await refreshAll(book);
       await reload();
       setTokenMsg(res.note ?? `Token saved — updated ${res.refreshed} live price(s).`);
       if (!res.note) setShowToken(false);
@@ -203,12 +212,31 @@ export default function TradesPage() {
 
   const openTrades = useMemo(() => trades.filter(t => t.status === "open"), [trades]);
   const closedTrades = useMemo(() => trades.filter(t => t.status === "closed"), [trades]);
+  const colCount = book === "paper" ? 13 : 12;
 
   return (
     <div className="flex flex-col h-full min-h-0 -m-6">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-gray-800 bg-gray-900">
-        <h1 className="text-lg font-semibold text-white">Trades & P&L</h1>
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-semibold text-white">Trades & P&L</h1>
+          <div className="flex items-center rounded-lg border border-gray-700 overflow-hidden text-xs">
+            {(["actual", "paper"] as const).map(b => (
+              <button
+                key={b}
+                onClick={() => switchBook(b)}
+                className={`px-3 py-1 capitalize transition ${
+                  book === b
+                    ? b === "paper" ? "bg-amber-600 text-white" : "bg-brand-600 text-white"
+                    : "bg-gray-800 text-gray-300 hover:text-white"
+                }`}
+                title={b === "paper" ? "Paper (simulated) trades" : "Real / actual trades"}
+              >
+                {b}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
             <button
@@ -232,7 +260,7 @@ export default function TradesPage() {
             onClick={() => setShowForm(true)}
             className="flex items-center gap-1 px-3 py-1.5 rounded bg-brand-600 hover:bg-brand-500 text-white text-xs"
           >
-            <Plus size={14} /> New trade
+            <Plus size={14} /> New {book === "paper" ? "paper " : ""}trade
           </button>
         </div>
       </div>
@@ -351,15 +379,16 @@ export default function TradesPage() {
                 <SortHeader k="pnl_pct" align="right">%</SortHeader>
                 <SortHeader k="entry_at">Entered</SortHeader>
                 <SortHeader k="exit_at">Exited / Held</SortHeader>
+                {book === "paper" && <th className="px-3 py-2 text-left">Rationale</th>}
                 <th className="px-3 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800 bg-gray-950">
               {loading && (
-                <tr><td colSpan={12} className="text-gray-500 text-center py-6">Loading…</td></tr>
+                <tr><td colSpan={colCount} className="text-gray-500 text-center py-6">Loading…</td></tr>
               )}
               {!loading && visible.length === 0 && (
-                <tr><td colSpan={12} className="text-gray-500 text-center py-6">No trades yet — click <span className="text-white">+ New trade</span> to log one.</td></tr>
+                <tr><td colSpan={colCount} className="text-gray-500 text-center py-6">No {book} trades yet — click <span className="text-white">+ New {book === "paper" ? "paper " : ""}trade</span> to log one.</td></tr>
               )}
               {visible.map(t => (
                 <tr key={t.id} className={`hover:bg-gray-900/70 ${selected.has(t.id) ? "bg-sky-500/5" : ""}`}>
@@ -401,6 +430,11 @@ export default function TradesPage() {
                       <span className="text-gray-600">open</span>
                     )}
                   </td>
+                  {book === "paper" && (
+                    <td className="px-3 py-2 text-gray-400 max-w-[16rem] truncate" title={t.rationale ?? ""}>
+                      {t.rationale || <span className="text-gray-600">—</span>}
+                    </td>
+                  )}
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     {t.status === "open" && (
                       <>
@@ -447,7 +481,7 @@ export default function TradesPage() {
       </div>
 
       {showForm && (
-        <NewTradeForm onClose={() => setShowForm(false)} onCreated={reload} />
+        <NewTradeForm mode={book} onClose={() => setShowForm(false)} onCreated={reload} />
       )}
       {editing && (
         <EditOpenTradeForm

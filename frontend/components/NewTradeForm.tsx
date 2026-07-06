@@ -3,17 +3,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import {
   createTrade, getCatalog, getExpiries, getLotSize, getFoUnderlyings,
-  InstrumentType, OptionType, Side, TradeCatalog,
+  InstrumentType, OptionType, Side, TradeCatalog, TradeMode,
 } from "@/lib/tradesApi";
 import { searchSymbols, SymbolMatch } from "@/lib/liveSources";
 import { fmtIsoDate, fmtIsoDateTime, localDatetimeToIso } from "@/lib/dates";
 
 interface Props {
+  mode: TradeMode;
   onClose: () => void;
   onCreated: () => void;
 }
 
-export default function NewTradeForm({ onClose, onCreated }: Props) {
+export default function NewTradeForm({ mode, onClose, onCreated }: Props) {
+  const isPaper = mode === "paper";
   const [catalog, setCatalog] = useState<TradeCatalog | null>(null);
   const [instrument, setInstrument] = useState<InstrumentType>("option");
   const [underlying, setUnderlying] = useState<string>("NIFTY");
@@ -36,6 +38,7 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
     return new Date(now.getTime() - off).toISOString().slice(0, 16);
   });
   const [notes, setNotes] = useState<string>("");
+  const [rationale, setRationale] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -130,9 +133,11 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
         instrument_type: instrument,
         underlying: u,
         side,
+        mode,
         num_lots: Math.max(1, parseInt(numLots || "1", 10)),
         entry_price: parseFloat(entryPrice),
       };
+      if (isPaper && rationale.trim()) payload.rationale = rationale.trim();
       if (lotSize) payload.lot_size = parseInt(lotSize, 10);
       // Prefer the live DOM value over React state — guards against picker → submit
       // races where the input's onChange hasn't propagated yet.
@@ -168,7 +173,10 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
     >
       <div ref={rootRef} className="w-full max-w-lg bg-gray-900 border border-gray-700 rounded-lg shadow-2xl text-sm">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-          <h2 className="text-base font-semibold text-white">New trade</h2>
+          <h2 className="text-base font-semibold text-white">
+            {isPaper ? "New paper trade" : "New trade"}
+            {isPaper && <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 align-middle">paper</span>}
+          </h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={16} /></button>
         </div>
 
@@ -416,6 +424,21 @@ export default function NewTradeForm({ onClose, onCreated }: Props) {
               className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-100"
             />
           </div>
+
+          {isPaper && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">
+                Why I&apos;m entering this trade <span className="text-gray-500">(thesis / setup)</span>
+              </label>
+              <textarea
+                value={rationale}
+                onChange={e => setRationale(e.target.value)}
+                rows={3}
+                placeholder="e.g. Donchian 22d breakout with rising volume; risk 1R below the channel low"
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-100 resize-y"
+              />
+            </div>
+          )}
 
           {err && <div className="text-xs text-red-400">{err}</div>}
         </div>

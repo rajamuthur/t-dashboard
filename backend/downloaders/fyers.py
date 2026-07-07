@@ -1,10 +1,20 @@
-import hashlib
 import os
-import requests
+import threading
+import time as _time
 import pandas as pd
 from datetime import datetime
-from dotenv import set_key, load_dotenv
+from dotenv import load_dotenv
 from fyers_apiv3 import fyersModel
+
+# Fyers access tokens expire daily (~6 AM IST) and the refresh-token API is
+# disabled (SEBI), so a fresh token requires a full TOTP re-login. When a call
+# hits an expired token we self-heal by running that login — but a burst of
+# failing calls (refresh-all, a futures scan) must trigger AT MOST one login,
+# hence a process-wide lock + cooldown shared across all downloader instances.
+_AUTO_LOGIN_LOCK = threading.Lock()
+_LAST_AUTO_LOGIN = 0.0
+_LAST_AUTO_OK = False
+_AUTO_LOGIN_COOLDOWN = 120.0
 
 
 class FyersDownloader:
@@ -44,30 +54,29 @@ class FyersDownloader:
         )
 
     def _try_refresh(self) -> bool:
-        rt  = os.getenv("REFRESH_TOKEN", "").strip("'\"")
-        pin = os.getenv("FYERS_PIN", "")
-        if not rt or not pin or not self._secret:
-            return False
-        h = hashlib.sha256(f"{self._app_id}:{self._secret}".encode()).hexdigest()
-        resp = requests.post(
-            "https://api-t1.fyers.in/api/v3/validate-refresh-token",
-            headers={"Content-Type": "application/json"},
-            json={"grant_type": "refresh_token", "appIdHash": h, "refresh_token": rt, "pin": pin},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            return False
-        data = resp.json()
-        if data.get("s") != "ok":
-            return False
-        new_token = data["access_token"]
-        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.env")
-        set_key(env_path, "ACCESS_TOKEN", new_token)
-        if data.get("refresh_token"):
-            set_key(env_path, "REFRESH_TOKEN", data["refresh_token"])
-        os.environ["ACCESS_TOKEN"] = new_token
-        self._fyers = self._build_client()
-        return True
+        """Token expired/invalid → mint a fresh one via TOTP auto-login. Fyers
+        disabled the refresh-token API (SEBI, -16), so a full re-login is the
+        ONLY working path. Process-wide cooldown so concurrent failing calls
+        trigger at most one login; on success the client is rebuilt from the
+        freshly stored token."""
+        global _LAST_AUTO_LOGIN, _LAST_AUTO_OK
+        with _AUTO_LOGIN_LOCK:
+            now = _time.monotonic()
+            if now - _LAST_AUTO_LOGIN < _AUTO_LOGIN_COOLDOWN:
+                # A very recent attempt already ran — reuse its outcome rather
+                # than hammering the login endpoint.
+                if _LAST_AUTO_OK:
+                    self._fyers = self._build_client()
+                return _LAST_AUTO_OK
+            _LAST_AUTO_LOGIN = now
+            try:
+                from ..fyers_auth import auto_login
+                _LAST_AUTO_OK = bool(auto_login().get("ok"))
+            except Exception:
+                _LAST_AUTO_OK = False
+        if _LAST_AUTO_OK:
+            self._fyers = self._build_client()
+        return _LAST_AUTO_OK
 
     def fetch_daily(self, symbol: str, start: str, end: str, _retried: bool = False,
                     resolution: str = "D") -> pd.DataFrame:

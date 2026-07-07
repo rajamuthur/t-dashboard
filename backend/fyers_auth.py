@@ -46,6 +46,53 @@ def _cfg() -> dict:
     }
 
 
+def _save_token(token: str) -> None:
+    """Persist the access token to BOTH stores so a refresh always takes effect:
+    - DB `config.fyers_token` (JSON-encoded) — what the app reads FIRST
+      (FyersDownloader._load_access_token). If we only wrote .env, a token
+      previously pasted via Settings would shadow every auto-login forever.
+    - .env ACCESS_TOKEN — fallback + visibility for the CLI / scheduled task.
+    """
+    env = _env_path()
+    set_key(env, "ACCESS_TOKEN", token)
+    os.environ["ACCESS_TOKEN"] = token
+    try:
+        import json
+        import sqlite3
+        from .db import _get_db_path
+        con = sqlite3.connect(_get_db_path())
+        con.execute(
+            "INSERT INTO config (key, value) VALUES ('fyers_token', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [json.dumps(token)],
+        )
+        con.commit()
+        con.close()
+    except Exception:
+        pass  # .env write already succeeded; DB is best-effort
+
+
+def _effective_token() -> str:
+    """The token the app actually uses: DB `config.fyers_token` first, else .env.
+    Mirrors FyersDownloader._load_access_token so the badge/expiry match reality."""
+    try:
+        import json
+        import sqlite3
+        from .db import _get_db_path
+        con = sqlite3.connect(_get_db_path())
+        row = con.execute("SELECT value FROM config WHERE key='fyers_token'").fetchone()
+        con.close()
+        if row and row[0]:
+            tok = json.loads(row[0])
+            if tok:
+                return str(tok).strip()
+    except Exception:
+        pass
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    return os.getenv("ACCESS_TOKEN", "")
+
+
 def auto_login() -> dict:
     """Run the full TOTP login. Returns {ok, message, step?}. Persists ACCESS_TOKEN."""
     c = _cfg()
@@ -123,11 +170,9 @@ def exchange_auth_code(auth_code: str) -> dict:
         token = resp.get("access_token")
         if not token:
             return {"ok": False, "step": "exchange", "message": str(resp)[:200]}
-        env = _env_path()
-        set_key(env, "ACCESS_TOKEN", token)
-        os.environ["ACCESS_TOKEN"] = token
+        _save_token(token)
         if resp.get("refresh_token"):
-            set_key(env, "REFRESH_TOKEN", resp["refresh_token"])
+            set_key(_env_path(), "REFRESH_TOKEN", resp["refresh_token"])
             os.environ["REFRESH_TOKEN"] = resp["refresh_token"]
         return {"ok": True, "message": "Access token refreshed and saved."}
     except Exception as exc:
@@ -148,9 +193,7 @@ def _token_expiry() -> "int | None":
     """Unix-epoch expiry decoded from the Fyers access token (a JWT). None if unparseable."""
     import base64
     import json
-    from dotenv import load_dotenv
-    load_dotenv(override=True)
-    tok = os.getenv("ACCESS_TOKEN", "")
+    tok = _effective_token()
     try:
         parts = tok.split(".")
         if len(parts) >= 2:

@@ -132,6 +132,31 @@ class FyersDownloader:
                         out[n] = {"lp": float(lp), "volume": float(v.get("volume") or 0)}
         return out
 
+    def quotes_full(self, symbols: list, _retried: bool = False) -> dict:
+        """Rich quote for many symbols → {symbol: {lp, chp, ch, prev_close, name}}.
+        For the watchlist (needs change %). Batches ≤50; self-heals on auth error."""
+        out: dict = {}
+        for i in range(0, len(symbols), 50):
+            chunk = symbols[i:i + 50]
+            resp = self._fyers.quotes({"symbols": ",".join(chunk)})
+            if isinstance(resp, dict) and resp.get("s") == "error" and not _retried:
+                if self._try_refresh():
+                    return self.quotes_full(symbols, _retried=True)
+            if isinstance(resp, dict) and resp.get("d"):
+                for item in resp["d"]:
+                    n = item.get("n"); v = item.get("v", {}) or {}
+                    lp = v.get("lp") or v.get("last_price")
+                    if not n or lp is None:
+                        continue
+                    out[n] = {
+                        "lp": float(lp),
+                        "chp": float(v.get("chp") or 0),
+                        "ch": float(v.get("ch") or 0),
+                        "prev_close": float(v.get("prev_close_price") or 0),
+                        "name": v.get("short_name") or v.get("description") or n,
+                    }
+        return out
+
     @staticmethod
     def resample_weekly(df: pd.DataFrame) -> pd.DataFrame:
         return df.resample("W-FRI").agg(

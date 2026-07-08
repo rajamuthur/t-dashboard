@@ -22,6 +22,7 @@ from .routers.trades import router as trades_router
 from .routers.fyers_auth import router as fyers_auth_router
 from .routers.swing import router as swing_router
 from .routers.futures import router as futures_router
+from .routers.watchlist import router as watchlist_router
 
 
 def create_app() -> FastAPI:
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
     application.include_router(fyers_auth_router)
     application.include_router(swing_router)
     application.include_router(futures_router)
+    application.include_router(watchlist_router)
     application.include_router(health_router)
     return application
 

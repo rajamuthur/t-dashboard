@@ -107,6 +107,25 @@ CREATE TABLE IF NOT EXISTS trades (
 );
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status, entry_at);
 CREATE INDEX IF NOT EXISTS idx_trades_underlying ON trades(underlying);
+
+-- Named watchlists (multiple) + their symbols. Fyers-format symbols
+-- (NSE:RELIANCE-EQ, NSE:NIFTY50-INDEX, NSE:SRF26AUGFUT).
+CREATE TABLE IF NOT EXISTS watchlists (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS watchlist_items (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    watchlist_id  INTEGER NOT NULL,
+    symbol        TEXT NOT NULL,
+    label         TEXT,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL,
+    UNIQUE(watchlist_id, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_items_wl ON watchlist_items(watchlist_id, sort_order);
 """
 
 async def migrate_schema() -> None:
@@ -141,7 +160,36 @@ async def init_db() -> None:
         await db.executescript(_DDL)
         await db.commit()
     await _seed_default_config()
+    await _seed_default_watchlist()
     await migrate_schema()
+
+
+async def _seed_default_watchlist() -> None:
+    """On a fresh DB (no watchlists yet), create a default list with the two
+    headline indices so the Watchlist page isn't empty on first open."""
+    from datetime import datetime, timezone
+    db_path = _get_db_path()
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute("SELECT COUNT(*) FROM watchlists") as cur:
+            (count,) = await cur.fetchone()
+        if count:
+            return
+        cur = await db.execute(
+            "INSERT INTO watchlists (name, sort_order, created_at) VALUES ('My Watchlist', 0, ?)",
+            [now],
+        )
+        wl_id = cur.lastrowid
+        for i, (sym, label) in enumerate([
+            ("NSE:NIFTY50-INDEX", "NIFTY 50"),
+            ("NSE:NIFTYBANK-INDEX", "NIFTY BANK"),
+        ]):
+            await db.execute(
+                "INSERT INTO watchlist_items (watchlist_id, symbol, label, sort_order, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                [wl_id, sym, label, i, now],
+            )
+        await db.commit()
 
 async def _seed_default_config() -> None:
     db_path = _get_db_path()

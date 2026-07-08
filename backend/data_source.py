@@ -400,6 +400,104 @@ class HyperliquidSource(DataSource):
 
 
 # --------------------------------------------------------------------------
+# Fyers — NSE/BSE equities, indices AND F&O contracts (futures/options).
+# Uses the app's authenticated Fyers session; symbols are Fyers-format
+# (NSE:RELIANCE-EQ, NSE:NIFTY50-INDEX, NSE:SRF26AUGFUT). This is what the
+# Watchlist right-pane charts, and it can chart F&O futures (yfinance can't).
+# --------------------------------------------------------------------------
+_FYERS_INDICES = [
+    "NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "NSE:FINNIFTY-INDEX",
+    "NSE:MIDCPNIFTY-INDEX", "NSE:NIFTYIT-INDEX", "BSE:SENSEX-INDEX",
+]
+
+
+@register("fyers")
+class FyersSource(DataSource):
+    label = "Fyers (India, incl. F&O)"
+    timeframes = ["5m", "15m", "30m", "1h", "1d"]
+    default_symbols = _FYERS_INDICES + [
+        "NSE:RELIANCE-EQ", "NSE:HDFCBANK-EQ", "NSE:INFY-EQ", "NSE:TCS-EQ", "NSE:SBIN-EQ",
+    ]
+    # timeframe → (Fyers resolution, calendar days to request). Ranges stay under
+    # Fyers' per-request caps (≤100 days intraday, ≤366 daily).
+    _RES = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "1d": "D"}
+    _RANGE_DAYS = {"5m": 30, "15m": 60, "30m": 90, "1h": 100, "1d": 360}
+    _universe_cache: Optional[List[str]] = None
+
+    async def fetch_candles(self, symbol: str, timeframe: str, limit: int = 300) -> List[Candle]:
+        from .downloaders.fyers import FyersDownloader
+        from datetime import datetime, timedelta
+        res = self._RES.get(timeframe, "D")
+        days = self._RANGE_DAYS.get(timeframe, 360)
+
+        def _fetch():
+            d = FyersDownloader()
+            end = datetime.now()
+            start = end - timedelta(days=days)
+            df = d.fetch_daily(symbol, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), resolution=res)
+            if df is None or df.empty:
+                return []
+            df = df.tail(limit)
+            out: List[Candle] = []
+            for ts, row in df.iterrows():
+                try:
+                    unix = int(ts.timestamp())
+                except Exception:
+                    continue
+                out.append(Candle(
+                    time=unix, open=float(row["open"]), high=float(row["high"]),
+                    low=float(row["low"]), close=float(row["close"]),
+                    volume=float(row.get("volume", 0) or 0),
+                ))
+            return out
+
+        return await asyncio.to_thread(_fetch)
+
+    async def fetch_quote(self, symbol: str) -> Optional[Quote]:
+        from .downloaders.fyers import FyersDownloader
+
+        def _fetch():
+            return FyersDownloader().quote(symbol)
+
+        price = await asyncio.to_thread(_fetch)
+        if price is None:
+            return None
+        return Quote(time=int(time.time()), price=float(price))
+
+    def _label(self, sym: str) -> str:
+        s = sym.split(":")[-1] if ":" in sym else sym
+        return s[:-3] if s.endswith("-EQ") else s
+
+    def _universe(self) -> List[str]:
+        if self._universe_cache is not None:
+            return self._universe_cache
+        syms = list(_FYERS_INDICES)
+        try:
+            from .fyers_fo_master import get_lot_sizes
+            from .futures_scan import INDEX_SPOT
+            idx = set(INDEX_SPOT.keys())
+            stocks = sorted(u for u in get_lot_sizes() if u not in idx)
+            syms += [f"NSE:{u}-EQ" for u in stocks]
+        except Exception:
+            pass
+        self._universe_cache = syms
+        return syms
+
+    async def search(self, query: str, limit: int = 50) -> List[SymbolMatch]:
+        universe = await asyncio.to_thread(self._universe)
+        q = query.strip().upper()
+        if not q:
+            return [SymbolMatch(symbol=s, label=self._label(s)) for s in universe[:limit]]
+        starts = [s for s in universe if self._label(s).upper().startswith(q)]
+        contains = [s for s in universe if q in s.upper() and s not in starts]
+        out = [SymbolMatch(symbol=s, label=self._label(s)) for s in (starts + contains)[:limit]]
+        # Let a fully-qualified symbol the user typed (e.g. NSE:SRF26AUGFUT) through.
+        if ":" in q and not any(m.symbol == q for m in out):
+            out.insert(0, SymbolMatch(symbol=q, label=q))
+        return out[:limit]
+
+
+# --------------------------------------------------------------------------
 # How to add a new broker (e.g. Binance, Alpaca, Zerodha, Polygon):
 #
 # @register("binance")

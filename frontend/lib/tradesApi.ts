@@ -54,7 +54,11 @@ export interface Trade {
   pnl_pct: number;
   ref_price: number;
   qty: number;
+  underlying_symbol: string;   // Fyers spot symbol (NSE:RELIANCE-EQ / index)
+  contract_symbol: string;     // Fyers traded-contract symbol (…FUT / option / spot)
 }
+
+export interface SpotQuote { lp: number | null; chp: number | null; symbol: string; }
 
 export interface NewTradePayload {
   instrument_type: InstrumentType;
@@ -109,6 +113,8 @@ export const listTrades = (status?: "open" | "closed", mode?: TradeMode) => {
 };
 export const getDashboard = (mode?: TradeMode) =>
   call<TradeDashboard>(`/trades/dashboard${mode ? `?mode=${mode}` : ""}`);
+export const getSpotQuotes = (mode?: TradeMode) =>
+  call<Record<string, SpotQuote>>(`/trades/spot-quotes${mode ? `?mode=${mode}` : ""}`);
 export const createTrade = (payload: NewTradePayload) =>
   call<Trade>("/trades", { method: "POST", body: JSON.stringify(payload) });
 export const patchTrade = (id: number, body: Partial<{

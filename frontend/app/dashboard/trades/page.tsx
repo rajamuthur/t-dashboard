@@ -5,10 +5,11 @@ import NewTradeForm from "@/components/NewTradeForm";
 import EditOpenTradeForm from "@/components/EditOpenTradeForm";
 import CloseTradeForm from "@/components/CloseTradeForm";
 import {
-  Trade, TradeDashboard, TradeMode,
+  Trade, TradeDashboard, TradeMode, SpotQuote,
   listTrades, getDashboard, refreshAll, refreshOne,
-  deleteTrade, setFyersToken,
+  deleteTrade, setFyersToken, getSpotQuotes,
 } from "@/lib/tradesApi";
+import TradeChartsModal from "@/components/TradeChartsModal";
 import { sendToTelegram } from "@/lib/telegramApi";
 import { fmtIsoDateTime } from "@/lib/dates";
 
@@ -57,6 +58,8 @@ export default function TradesPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [sending, setSending] = useState(false);
   const [sendMsg, setSendMsg] = useState<string | null>(null);
+  const [spotQuotes, setSpotQuotes] = useState<Record<string, SpotQuote>>({});
+  const [charting, setCharting] = useState<Trade | null>(null);
 
   function toggleSelect(id: number) {
     setSelected(prev => {
@@ -89,9 +92,14 @@ export default function TradesPage() {
 
   const reload = useCallback(async () => {
     try {
-      const [t, d] = await Promise.all([listTrades(undefined, book), getDashboard(book)]);
+      const [t, d, sq] = await Promise.all([
+        listTrades(undefined, book),
+        getDashboard(book),
+        getSpotQuotes(book).catch(() => ({} as Record<string, SpotQuote>)),
+      ]);
       setTrades(t);
       setDash(d);
+      setSpotQuotes(sq);
     } finally {
       setLoading(false);
     }
@@ -212,7 +220,7 @@ export default function TradesPage() {
 
   const openTrades = useMemo(() => trades.filter(t => t.status === "open"), [trades]);
   const closedTrades = useMemo(() => trades.filter(t => t.status === "closed"), [trades]);
-  const colCount = book === "paper" ? 13 : 12;
+  const colCount = book === "paper" ? 14 : 13;
 
   return (
     <div className="flex flex-col h-full min-h-0 -m-6">
@@ -375,6 +383,7 @@ export default function TradesPage() {
                 <SortHeader k="qty" align="right">Qty</SortHeader>
                 <SortHeader k="entry_price" align="right">Entry</SortHeader>
                 <SortHeader k="ref_price" align="right">Current / Exit</SortHeader>
+                <th className="px-3 py-2 text-right">Stock</th>
                 <SortHeader k="pnl" align="right">P&L</SortHeader>
                 <SortHeader k="pnl_pct" align="right">%</SortHeader>
                 <SortHeader k="entry_at">Entered</SortHeader>
@@ -400,7 +409,13 @@ export default function TradesPage() {
                       onChange={() => toggleSelect(t.id)}
                     />
                   </td>
-                  <td className="px-3 py-2 text-gray-100 font-mono">{t.symbol}</td>
+                  <td className="px-3 py-2 font-mono">
+                    <button onClick={() => setCharting(t)}
+                      className="text-brand-300 hover:text-brand-200 hover:underline text-left"
+                      title="View stock + contract charts">
+                      {t.symbol}
+                    </button>
+                  </td>
                   <td className="px-3 py-2 capitalize text-gray-300">{t.instrument_type}</td>
                   <td className="px-3 py-2">
                     <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider ${
@@ -414,6 +429,14 @@ export default function TradesPage() {
                   <td className="px-3 py-2 text-right font-mono text-gray-200">{inr(t.entry_price)}</td>
                   <td className="px-3 py-2 text-right font-mono text-gray-200">
                     {t.status === "closed" ? inr(t.exit_price) : inr(t.current_price)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono">
+                    {(() => { const sq = spotQuotes[t.underlying]; return sq ? (
+                      <>
+                        <span className="text-gray-200">{inr(sq.lp)}</span><br/>
+                        <span className={`text-[10px] ${pctColor(sq.chp)}`}>{sq.chp != null ? `${sq.chp > 0 ? "+" : ""}${sq.chp.toFixed(2)}%` : "—"}</span>
+                      </>
+                    ) : <span className="text-gray-600">—</span>; })()}
                   </td>
                   <td className={`px-3 py-2 text-right font-mono ${pctColor(t.pnl)}`}>{inr(t.pnl)}</td>
                   <td className={`px-3 py-2 text-right font-mono ${pctColor(t.pnl_pct)}`}>
@@ -496,6 +519,9 @@ export default function TradesPage() {
           onClose={() => setClosing(null)}
           onClosed={reload}
         />
+      )}
+      {charting && (
+        <TradeChartsModal trade={charting} onClose={() => setCharting(null)} />
       )}
     </div>
   );

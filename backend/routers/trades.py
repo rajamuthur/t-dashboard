@@ -55,6 +55,48 @@ def _pnl(t: dict) -> dict:
     return {"pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 4), "ref_price": ref, "qty": qty}
 
 
+# Fyers chart symbols. Index underlyings map to their -INDEX symbol; everything
+# else is a stock -> NSE:<UND>-EQ. Used for the charts modal + the spot column.
+_INDEX_CHART = {
+    "NIFTY": "NSE:NIFTY50-INDEX", "BANKNIFTY": "NSE:NIFTYBANK-INDEX",
+    "FINNIFTY": "NSE:FINNIFTY-INDEX", "MIDCPNIFTY": "NSE:MIDCPNIFTY-INDEX",
+    "NIFTYNEXT50": "NSE:NIFTYNXT50-INDEX", "SENSEX": "BSE:SENSEX-INDEX",
+    "BANKEX": "BSE:BANKEX-INDEX",
+}
+
+
+def _underlying_symbol(t: dict) -> str:
+    und = (t.get("underlying") or "").strip().upper()
+    if und in _INDEX_CHART:
+        return _INDEX_CHART[und]
+    und = und.replace(".NS", "").replace(".BO", "")
+    return f"NSE:{und}-EQ"
+
+
+def _chart_symbols(t: dict) -> dict:
+    """Spot (underlying) + traded-contract Fyers symbols for the charts modal."""
+    us = _underlying_symbol(t)
+    it = t.get("instrument_type")
+    und = (t.get("underlying") or "").strip().upper().replace(".NS", "").replace(".BO", "")
+    exp = t.get("expiry_date")
+    cs = us
+    try:
+        if it == "future" and exp:
+            cs = fo_future_symbol(und, exp)
+        elif it == "option" and exp and t.get("strike") and t.get("option_type"):
+            cs = fo_option_symbol(und, exp, t["option_type"], float(t["strike"]))
+    except Exception:
+        cs = us
+    return {"underlying_symbol": us, "contract_symbol": cs}
+
+
+def _quotes_full(symbols: list[str]) -> dict:
+    from ..downloaders.fyers import FyersDownloader
+    if not symbols:
+        return {}
+    return FyersDownloader().quotes_full(symbols)
+
+
 # --------------------------------------------------------------------------
 # Pydantic schemas
 # --------------------------------------------------------------------------
@@ -180,7 +222,7 @@ async def list_trades(
     out = []
     for r in rows:
         d = _row_to_dict(r)
-        d.update(_pnl(d))
+        d.update(_pnl(d)); d.update(_chart_symbols(d))
         out.append(d)
     return out
 
@@ -231,7 +273,7 @@ async def create_trade(
     ) as q:
         row = await q.fetchone()
     d = _row_to_dict(row)
-    d.update(_pnl(d))
+    d.update(_pnl(d)); d.update(_chart_symbols(d))
     return d
 
 
@@ -289,7 +331,7 @@ async def patch_trade(
     if not row:
         raise HTTPException(404, "Trade not found")
     d = _row_to_dict(row)
-    d.update(_pnl(d))
+    d.update(_pnl(d)); d.update(_chart_symbols(d))
     return d
 
 
@@ -399,7 +441,7 @@ async def refresh_one(
             "Price unavailable — options need manual update via PATCH {current_price}",
         )
     trade["current_price"] = price
-    trade.update(_pnl(trade))
+    trade.update(_pnl(trade)); trade.update(_chart_symbols(trade))
     return trade
 
 
@@ -440,6 +482,33 @@ async def refresh_all(
     if rows and updated == 0:
         note = "No prices updated — Fyers token likely expired. Update it in Settings."
     return {"refreshed": updated, "skipped": skipped, "note": note}
+
+
+@router.get("/spot-quotes")
+async def spot_quotes(
+    mode: Optional[str] = Query(default=None, pattern="^(actual|paper)$"),
+    status: Optional[str] = Query(default=None, pattern="^(open|closed)$"),
+    db: aiosqlite.Connection = Depends(get_db),
+    _: str = Depends(get_current_user),
+):
+    """Live underlying-spot LTP + daily change% per trade underlying, for the
+    'Stock' column. Keyed by underlying (as stored on the trade)."""
+    q = "SELECT DISTINCT underlying FROM trades WHERE 1=1"
+    p: list = []
+    if mode:
+        q += " AND mode = ?"; p.append(mode)
+    if status:
+        q += " AND status = ?"; p.append(status)
+    async with db.execute(q, p) as cur:
+        rows = await cur.fetchall()
+    sym_by_und = {r[0]: _underlying_symbol({"underlying": r[0]}) for r in rows if r[0]}
+    quotes = await asyncio.to_thread(_quotes_full, list(set(sym_by_und.values())))
+    out: dict = {}
+    for und, sym in sym_by_und.items():
+        info = quotes.get(sym)
+        if info:
+            out[und] = {"lp": info.get("lp"), "chp": info.get("chp"), "symbol": sym}
+    return out
 
 
 # --------------------------------------------------------------------------

@@ -3,8 +3,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from pydantic import BaseModel
+from dotenv import load_dotenv
 import os
 import secrets
+
+# Load .env BEFORE reading JWT_SECRET below. auth.py is imported before db.py
+# (which used to be the only load_dotenv caller), so without this the env vars
+# aren't loaded yet and JWT_SECRET falls back to a fresh random secret on every
+# process start — invalidating all sessions on each restart. Load it here so the
+# stable JWT_SECRET from .env is actually used and logins survive restarts.
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Secrets / credentials are sourced from env vars.

@@ -35,7 +35,7 @@ class FyersDownloader:
             import json
             import sqlite3
             from ..db import _get_db_path
-            con = sqlite3.connect(_get_db_path())
+            con = sqlite3.connect(_get_db_path(), timeout=15)
             row = con.execute("SELECT value FROM config WHERE key='fyers_token'").fetchone()
             con.close()
             if row and row[0]:

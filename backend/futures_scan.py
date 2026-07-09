@@ -167,6 +167,7 @@ async def _log_and_alert(rows: list[dict]) -> int:
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     new_matches = []
     async with aiosqlite.connect(db_path) as db:
+        await db.execute("PRAGMA busy_timeout=15000")
         await db.execute(
             """CREATE TABLE IF NOT EXISTS futures_matches (
                  id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, day TEXT, underlying TEXT,
@@ -252,7 +253,7 @@ async def chart_data(underlying: str) -> dict:
     """Underlying daily candles + a spot reference line, for entry validation."""
     import sqlite3
     def _load():
-        con = sqlite3.connect(_get_db_path())
+        con = sqlite3.connect(_get_db_path(), timeout=15)
         sym = _spot_symbol(underlying)
         rows = con.execute(
             "SELECT date, open, high, low, close, volume FROM candles WHERE symbol=? AND timeframe='day' ORDER BY date ASC",

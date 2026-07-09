@@ -60,7 +60,7 @@ def _save_token(token: str) -> None:
         import json
         import sqlite3
         from .db import _get_db_path
-        con = sqlite3.connect(_get_db_path())
+        con = sqlite3.connect(_get_db_path(), timeout=15)
         con.execute(
             "INSERT INTO config (key, value) VALUES ('fyers_token', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -79,7 +79,7 @@ def _effective_token() -> str:
         import json
         import sqlite3
         from .db import _get_db_path
-        con = sqlite3.connect(_get_db_path())
+        con = sqlite3.connect(_get_db_path(), timeout=15)
         row = con.execute("SELECT value FROM config WHERE key='fyers_token'").fetchone()
         con.close()
         if row and row[0]:

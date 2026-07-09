@@ -157,6 +157,15 @@ async def migrate_schema() -> None:
 async def init_db() -> None:
     db_path = _get_db_path()
     async with aiosqlite.connect(db_path) as db:
+        # WAL is a persistent, file-level setting: once enabled it applies to
+        # every connection AND every process (backend + the daily-login task),
+        # so readers and the writer no longer block each other. This is the fix
+        # for the "database is locked" errors under concurrent access. Only
+        # writer-vs-writer serialize now, and busy_timeout makes them queue
+        # instead of failing instantly.
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        await db.execute("PRAGMA busy_timeout=15000")
         await db.executescript(_DDL)
         await db.commit()
     await _seed_default_config()
@@ -259,4 +268,6 @@ async def get_db():
     db_path = _get_db_path()
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
+        # Wait up to 15s for a write lock instead of erroring instantly.
+        await db.execute("PRAGMA busy_timeout=15000")
         yield db

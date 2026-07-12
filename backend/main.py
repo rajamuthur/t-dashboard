@@ -23,6 +23,7 @@ from .routers.fyers_auth import router as fyers_auth_router
 from .routers.swing import router as swing_router
 from .routers.futures import router as futures_router
 from .routers.watchlist import router as watchlist_router
+from .routers.ema import router as ema_router
 
 
 def create_app() -> FastAPI:
@@ -83,6 +84,7 @@ def create_app() -> FastAPI:
     application.include_router(swing_router)
     application.include_router(futures_router)
     application.include_router(watchlist_router)
+    application.include_router(ema_router)
     application.include_router(health_router)
     return application
 

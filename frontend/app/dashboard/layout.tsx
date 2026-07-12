@@ -7,7 +7,7 @@ import FyersTokenBadge from "@/components/FyersTokenBadge";
 import {
   LayoutDashboard, TrendingUp, Calendar, CandlestickChart, Settings, LogOut,
   ChevronDown, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen,
-  Shapes, Target, FlaskConical, Scale, Eye,
+  Shapes, Target, FlaskConical, Scale, Eye, GitFork,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +31,7 @@ const GROUPS: { key: string; label: string; items: NavItem[] }[] = [
     { href: "/dashboard/patterns", label: "Patterns",      icon: Shapes },
     { href: "/dashboard/vcp",      label: "VCP Scanner",   icon: Target },
     { href: "/dashboard/swing",    label: "Swing Trading", icon: TrendingUp },
+    { href: "/dashboard/ema",      label: "EMA Cross",     icon: GitFork },
     { href: "/dashboard/futures",  label: "Futures Basis", icon: Scale },
   ]},
   { key: "trading", label: "Trading", items: [

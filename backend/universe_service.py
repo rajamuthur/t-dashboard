@@ -85,6 +85,8 @@ async def _write_cache(db_path: str, key: str, stocks: list[str]) -> None:
 async def get_universe_stocks(universe: str | None) -> list[str]:
     """Resolve a universe key to its symbol list (live NSE → cache → F&O fallback)."""
     key = (universe or DEFAULT_UNIVERSE).lower()
+    if key == "all":
+        return await get_all_universe_symbols()
     if key not in UNIVERSES:
         key = DEFAULT_UNIVERSE
     if key == "fo":

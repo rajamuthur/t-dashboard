@@ -414,14 +414,15 @@ _FYERS_INDICES = [
 @register("fyers")
 class FyersSource(DataSource):
     label = "Fyers (India, incl. F&O)"
-    timeframes = ["5m", "15m", "30m", "1h", "1d"]
+    timeframes = ["5m", "15m", "30m", "1h", "1d", "1wk", "1mo"]
     default_symbols = _FYERS_INDICES + [
         "NSE:RELIANCE-EQ", "NSE:HDFCBANK-EQ", "NSE:INFY-EQ", "NSE:TCS-EQ", "NSE:SBIN-EQ",
     ]
     # timeframe → (Fyers resolution, calendar days to request). Ranges stay under
-    # Fyers' per-request caps (≤100 days intraday, ≤366 daily).
-    _RES = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "1d": "D"}
-    _RANGE_DAYS = {"5m": 30, "15m": 60, "30m": 90, "1h": 100, "1d": 360}
+    # Fyers' per-request caps (≤100 days intraday, ≤366 daily). 1wk/1mo fetch
+    # daily then resample.
+    _RES = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "1d": "D", "1wk": "D", "1mo": "D"}
+    _RANGE_DAYS = {"5m": 30, "15m": 60, "30m": 90, "1h": 100, "1d": 360, "1wk": 360, "1mo": 360}
     _universe_cache: Optional[List[str]] = None
 
     async def fetch_candles(self, symbol: str, timeframe: str, limit: int = 300) -> List[Candle]:
@@ -437,6 +438,10 @@ class FyersSource(DataSource):
             df = d.fetch_daily(symbol, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), resolution=res)
             if df is None or df.empty:
                 return []
+            if timeframe == "1wk":
+                df = d.resample_weekly(df)
+            elif timeframe == "1mo":
+                df = d.resample_monthly(df)
             df = df.tail(limit)
             out: List[Candle] = []
             for ts, row in df.iterrows():

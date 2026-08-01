@@ -32,6 +32,15 @@ async def _monthly_job() -> None:
     await run_sync("month")
 
 
+async def _alerts_job() -> None:
+    """Evaluate chart alerts against live LTP (market-gated inside)."""
+    from ..alert_watch import run_alert_check
+    try:
+        await run_alert_check()
+    except Exception:
+        logger.exception("alert check failed")
+
+
 async def _eow_job() -> None:
     """Run EOW scan only if today is the last trading day of the week."""
     from ..routers.holidays import get_holiday_set, get_last_trading_day_of_week
@@ -76,8 +85,34 @@ def start_scheduler() -> None:
         hour=hour, minute=minute,
         id="eow_scan",
     )
+    # Chart-alert watcher — interval (configurable, default 5 min), market-gated.
+    _scheduler.add_job(_alerts_job, "interval", minutes=_get_alert_minutes_sync(), id="alerts_watch")
+
     logger.info("Scheduler started. EOW job at %02d:%02d IST", hour, minute)
     _scheduler.start()
+
+
+def _get_alert_minutes_sync() -> int:
+    """Read config.alert_check_minutes synchronously at startup (default 5)."""
+    try:
+        import sqlite3
+        from ..db import _get_db_path
+        con = sqlite3.connect(_get_db_path())
+        row = con.execute("SELECT value FROM config WHERE key='alert_check_minutes'").fetchone()
+        con.close()
+        if row:
+            return max(1, int(json.loads(row[0])))
+    except Exception:
+        pass
+    return 5
+
+
+def reschedule_alerts(minutes: int) -> None:
+    """Apply a new alert-check interval immediately (called after config update)."""
+    if not _scheduler or not _scheduler.running:
+        return
+    _scheduler.reschedule_job("alerts_watch", trigger="interval", minutes=max(1, int(minutes)))
+    logger.info("Alert watcher rescheduled to every %d min", max(1, int(minutes)))
 
 
 def stop_scheduler() -> None:

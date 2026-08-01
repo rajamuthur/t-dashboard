@@ -126,6 +126,42 @@ CREATE TABLE IF NOT EXISTS watchlist_items (
     UNIQUE(watchlist_id, symbol)
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_items_wl ON watchlist_items(watchlist_id, sort_order);
+
+-- Price / trendline alerts drawn on a chart. Trend anchors (t1..p2) are unix
+-- seconds; horizontal uses `price`. Evaluated against live LTP by a watcher job.
+CREATE TABLE IF NOT EXISTS alerts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol       TEXT NOT NULL,                        -- Fyers symbol (NSE:XXX-EQ / index)
+    name         TEXT,
+    timeframe    TEXT NOT NULL DEFAULT 'day',          -- chart tf it was drawn on
+    kind         TEXT NOT NULL,                        -- 'horizontal' | 'trend'
+    condition    TEXT NOT NULL,                        -- 'cross_up' | 'cross_down'
+    repeat_mode  TEXT NOT NULL DEFAULT 'once',         -- 'once' | 'recurring'
+    price        REAL,                                 -- horizontal level
+    t1 INTEGER, p1 REAL, t2 INTEGER, p2 REAL,          -- trend anchors (unix secs)
+    note         TEXT,
+    status       TEXT NOT NULL DEFAULT 'active',       -- 'active' | 'triggered' | 'disabled'
+    last_diff    REAL,                                 -- LTP - line_value at last check (cross detection)
+    created_at   TEXT NOT NULL,
+    triggered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_symbol ON alerts(symbol);
+CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+
+-- One row per time an alert fires, with Telegram delivery status.
+CREATE TABLE IF NOT EXISTS alert_notifications (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    alert_id     INTEGER NOT NULL,
+    symbol       TEXT,
+    triggered_at TEXT NOT NULL,
+    price        REAL,                                 -- LTP at trigger
+    line_value   REAL,                                 -- threshold at trigger
+    direction    TEXT,                                 -- 'up' | 'down'
+    message      TEXT,
+    delivered    INTEGER NOT NULL DEFAULT 0,           -- Telegram send succeeded?
+    error        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alert_notifs_alert ON alert_notifications(alert_id, id);
 """
 
 async def migrate_schema() -> None:

@@ -24,6 +24,7 @@ from .routers.swing import router as swing_router
 from .routers.futures import router as futures_router
 from .routers.watchlist import router as watchlist_router
 from .routers.ema import router as ema_router
+from .routers.alerts import router as alerts_router
 
 
 def create_app() -> FastAPI:
@@ -45,6 +46,17 @@ def create_app() -> FastAPI:
             pass
         if scheduler_enabled:
             start_scheduler()
+            # Run the alert watcher once on startup too (market-gated inside), so a
+            # restart during market hours checks immediately instead of waiting.
+            import asyncio
+
+            async def _startup_alert_check():
+                try:
+                    from .alert_watch import run_alert_check
+                    await run_alert_check()
+                except Exception:
+                    pass
+            asyncio.create_task(_startup_alert_check())
         yield
         if scheduler_enabled:
             stop_scheduler()
@@ -85,6 +97,7 @@ def create_app() -> FastAPI:
     application.include_router(futures_router)
     application.include_router(watchlist_router)
     application.include_router(ema_router)
+    application.include_router(alerts_router)
     application.include_router(health_router)
     return application
 

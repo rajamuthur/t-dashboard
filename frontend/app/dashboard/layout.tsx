@@ -7,7 +7,7 @@ import FyersTokenBadge from "@/components/FyersTokenBadge";
 import {
   LayoutDashboard, TrendingUp, Calendar, CandlestickChart, Settings, LogOut,
   ChevronDown, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen,
-  Shapes, Target, FlaskConical, Scale, Eye, GitFork,
+  Shapes, Target, FlaskConical, Scale, Eye, GitFork, Bell,
   type LucideIcon,
 } from "lucide-react";
 
@@ -18,6 +18,7 @@ const OVERVIEW: NavItem = { href: "/dashboard", label: "Overview", icon: LayoutD
 const GROUPS: { key: string; label: string; items: NavItem[] }[] = [
   { key: "markets", label: "Markets", items: [
     { href: "/dashboard/watchlist",   label: "Watchlist",    icon: Eye },
+    { href: "/dashboard/alerts",      label: "Alerts",       icon: Bell },
     { href: "/dashboard/charts",      label: "Charts",       icon: CandlestickChart },
     { href: "/dashboard/live-charts", label: "Live Charts",  icon: Radio },
   ]},

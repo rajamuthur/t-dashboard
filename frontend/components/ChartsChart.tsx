@@ -146,13 +146,14 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
     farRef.current = fut[fut.length - 1] ?? lastReal;
     candle.setData(candles.map(c => ({ time: c.time as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close })) as any);
     const ws = chart.addSeries(LineSeries, { color: "rgba(0,0,0,0)", lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: NO_AUTOSCALE });
-    ws.setData(fut.map(t => ({ time: t as UTCTimestamp })) as any);   // future whitespace (own series, no OHLC → live update stays valid)
+    const lastClose = candles[candles.length - 1].close;
+    ws.setData(fut.map(t => ({ time: t as UTCTimestamp, value: lastClose })) as any);   // transparent line → reliably extends the time axis into the future
     const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "" }, 1);
     vol.setData(candles.map(c => ({ time: c.time as UTCTimestamp, value: c.volume, color: c.close >= c.open ? "#86efac" : "#fca5a5" })) as any);
     chart.panes()[1]?.setHeight(90);
     chartRef.current = chart; candleRef.current = candle;
     lastBarRef.current = candles[candles.length - 1];
-    try { chart.timeScale().setVisibleRange({ from: candles[0].time as any, to: (fut[Math.min(12, fut.length - 1)] ?? lastReal) as any }); } catch { chart.timeScale().fitContent(); }
+    // Default view = recent bars + the future whitespace zone (thick candles, room to draw right).
     drawOverlays();
     computeHandles();
 

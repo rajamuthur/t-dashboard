@@ -101,7 +101,7 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
       width: wrapRef.current.clientWidth, height,
       timeScale: { borderColor: "#cbd5e1", timeVisible: timeframe.endsWith("m") || timeframe === "1h", secondsVisible: false },
       rightPriceScale: { borderColor: "#cbd5e1" },
-      crosshair: { mode: 1 },
+      crosshair: { mode: 0 },   // Normal = free crosshair (place lines at any price)
     });
     const series = chart.addSeries(CandlestickSeries, {
       upColor: "#16a34a", downColor: "#dc2626", borderUpColor: "#16a34a", borderDownColor: "#dc2626",

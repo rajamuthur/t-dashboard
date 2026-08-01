@@ -52,11 +52,15 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
   const [showList, setShowList] = useState(false);
   const [fs, setFs] = useState(false);
   const [hint, setHint] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const drawingsRef = useRef<Drawing[]>([]);
 
   useEffect(() => { styleRef.current = { color, width }; }, [color, width]);
-  useEffect(() => { setDrawings(loadDrawings(symbol)); cancelDraw(); }, [symbol]);
+  useEffect(() => { drawingsRef.current = drawings; }, [drawings]);
+  useEffect(() => { setDrawings(loadDrawings(symbol)); cancelDraw(); setSelectedId(null); }, [symbol]);
   useEffect(() => {
     toolRef.current = tool;
+    if (tool) setSelectedId(null);
     if (!tool) { cancelDraw(); setHint(""); }
     else setHint(tool === "trend" ? "click point A" : tool === "hray" ? "click to place a ray" : "click to place a line");
   }, [tool]);
@@ -119,7 +123,7 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
       grid: { vertLines: { color: "#eef2f7" }, horzLines: { color: "#eef2f7" } },
       width: containerRef.current.clientWidth, height: fs ? window.innerHeight : height,
       timeScale: { borderColor: "#cbd5e1", timeVisible: timeframe.endsWith("m") || timeframe === "1h", secondsVisible: false },
-      rightPriceScale: { borderColor: "#cbd5e1" }, crosshair: { mode: 1 },
+      rightPriceScale: { borderColor: "#cbd5e1" }, crosshair: { mode: 0 },   // Normal = free crosshair (place lines at any price)
     });
     const candle = chart.addSeries(CandlestickSeries, { upColor: "#16a34a", downColor: "#dc2626", borderUpColor: "#16a34a", borderDownColor: "#dc2626", wickUpColor: "#16a34a", wickDownColor: "#dc2626" });
     const nFut = timeframe === "1mo" ? 12 : timeframe === "1wk" ? 26 : 50;
@@ -145,10 +149,28 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
     const timeAt = (param: any): number | null => (typeof param.time === "number" ? param.time : (chart.timeScale().coordinateToTime(param.point?.x) as number | null));
 
     const onClick = (param: any) => {
-      const t = toolRef.current; if (!t || !param.point) return;
-      const price = priceAt(param.point.y); if (price == null) return;
+      if (!param.point) return;
+      const t = toolRef.current;
+      const price = priceAt(param.point.y);
+      const time = timeAt(param);
+      if (!t) {   // cursor mode → click a line to select/edit it
+        if (price == null) return;
+        const y = param.point.y; let hit: string | null = null;
+        for (const d of drawingsRef.current) {
+          let v: number | null = null;
+          if (d.kind === "hline") v = d.price ?? null;
+          else if (d.kind === "hray") { if (time != null && d.t1 != null && time >= d.t1) v = d.price ?? null; }
+          else if (d.kind === "trend" && d.t1 != null && d.p1 != null && d.t2 != null && d.p2 != null && d.timeframe === timeframe && time != null && d.t1 !== d.t2) v = d.p1 + (d.p2 - d.p1) / (d.t2 - d.t1) * (time - d.t1);
+          if (v == null) continue;
+          const ly = candle.priceToCoordinate(v);
+          if (ly != null && Math.abs(ly - y) <= 6) { hit = d.id; break; }
+        }
+        setSelectedId(hit);
+        return;
+      }
+      if (price == null) return;
       if (t === "hline") { add({ kind: "hline", price: Number(price.toFixed(2)) }); setTool(null); return; }
-      const time = timeAt(param); if (time == null) return;
+      if (time == null) return;
       if (t === "hray") { add({ kind: "hray", price: Number(price.toFixed(2)), t1: time }); setTool(null); return; }
       if (!anchorRef.current) { anchorRef.current = { t: time, p: price }; setHint("click point B"); }
       else if (time !== anchorRef.current.t) { const a = anchorRef.current; add({ kind: "trend", t1: a.t, p1: a.p, t2: time, p2: price }); cancelDraw(); setTool(null); }
@@ -186,7 +208,7 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
   );
 
   return (
-    <div ref={wrapRef} className={`bg-white rounded-lg border border-gray-200 ${fs ? "fixed inset-0 z-50 rounded-none" : ""}`}>
+    <div ref={wrapRef} className={`relative bg-white rounded-lg border border-gray-200 ${fs ? "fixed inset-0 z-50 rounded-none" : ""}`}>
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-200 text-xs flex-wrap relative">
         <button onClick={() => setTool(null)} title="Cursor" className={`flex items-center px-2 py-1 rounded border ${!tool ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300 text-gray-600 hover:bg-gray-100"}`}><MousePointer size={12} /></button>
         <ToolBtn t="trend" icon={TrendingUp} label="Trend Line" />
@@ -196,6 +218,7 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
         <select value={width} onChange={e => setWidth(Number(e.target.value))} className="border border-gray-300 rounded px-1 py-0.5 text-gray-700" title="Line width">{[1, 2, 3, 4].map(w => <option key={w} value={w}>{w}px</option>)}</select>
         {drawings.length > 0 && <button onClick={() => setShowList(v => !v)} className={`flex items-center gap-1 px-2 py-1 rounded border ${showList ? "bg-gray-200 border-gray-400" : "border-gray-300 hover:bg-gray-100"} text-gray-600`} title="Edit drawings">✎ {drawings.length}</button>}
         {tool && <span className="text-blue-600">{hint}</span>}
+        {!tool && drawings.length > 0 && !selectedId && <span className="text-gray-400">click a line to edit</span>}
         <button onClick={toggleFs} className="ml-auto flex items-center px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100" title={fs ? "Exit fullscreen" : "Fullscreen"}>{fs ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
 
         {showList && drawings.length > 0 && (
@@ -212,6 +235,23 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
           </div>
         )}
       </div>
+
+      {selectedId && (() => {
+        const d = drawings.find(x => x.id === selectedId);
+        if (!d) return null;
+        return (
+          <div className="absolute top-11 left-2 z-30 bg-white border border-gray-300 rounded-lg shadow-lg p-2 text-xs text-gray-700 space-y-1.5">
+            <div className="flex items-center justify-between gap-6"><span className="font-medium">{d.kind === "hline" ? "Horizontal" : d.kind === "hray" ? "H-Ray" : "Trend"} line</span><button onClick={() => setSelectedId(null)} className="text-gray-400 hover:text-gray-700">✕</button></div>
+            <div className="flex items-center gap-1">{COLORS.map(c => <button key={c} onClick={() => updateDrawing(d.id, { color: c })} className={`w-4 h-4 rounded-full border-2 ${d.color === c ? "border-gray-800" : "border-white"}`} style={{ background: c }} />)}</div>
+            <div className="flex items-center gap-2">
+              <select value={d.width} onChange={e => updateDrawing(d.id, { width: Number(e.target.value) })} className="border border-gray-300 rounded px-1 py-0.5">{[1, 2, 3, 4].map(w => <option key={w} value={w}>{w}px</option>)}</select>
+              {(d.kind === "hline" || d.kind === "hray") && <input type="number" step="any" value={d.price ?? 0} onChange={e => updateDrawing(d.id, { price: parseFloat(e.target.value) || 0 })} className="w-24 border border-gray-300 rounded px-1 py-0.5" title="Price level" />}
+              <button onClick={() => { persist(drawings.filter(x => x.id !== d.id)); setSelectedId(null); }} className="ml-auto flex items-center gap-1 text-red-500 hover:text-red-700"><Trash2 size={13} /> delete</button>
+            </div>
+          </div>
+        );
+      })()}
+
       {candles.length === 0
         ? <div className="flex items-center justify-center text-gray-400 text-sm" style={{ height }}>No chart data.</div>
         : <div ref={containerRef} className={`w-full ${tool ? "cursor-crosshair" : ""}`} style={{ height: fs ? "calc(100vh - 40px)" : height }} />}

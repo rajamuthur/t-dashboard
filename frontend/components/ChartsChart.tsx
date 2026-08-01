@@ -126,10 +126,11 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
     const lastReal = candles[candles.length - 1].time;
     const fut = futureTimes(lastReal, timeframe, nFut);
     farRightRef.current = fut[fut.length - 1] ?? lastReal;
-    candle.setData([
-      ...candles.map(c => ({ time: c.time as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close })),
-      ...fut.map(t => ({ time: t as UTCTimestamp })),   // whitespace = future space
-    ] as any);
+    // Candle series = real bars ONLY, so live update() (which must target the
+    // last point) works. Future space lives on a separate invisible series.
+    candle.setData(candles.map(c => ({ time: c.time as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close })) as any);
+    const ws = chart.addSeries(LineSeries, { color: "rgba(0,0,0,0)", lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+    ws.setData(fut.map(t => ({ time: t as UTCTimestamp })) as any);   // whitespace = future space
     const vol = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "" }, 1);
     vol.setData(candles.map(c => ({ time: c.time as UTCTimestamp, value: c.volume, color: c.close >= c.open ? "#86efac" : "#fca5a5" })) as any);
     chart.panes()[1]?.setHeight(90);

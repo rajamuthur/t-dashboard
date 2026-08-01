@@ -29,10 +29,13 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
   const overlayRef = useRef<{ series: ISeriesApi<any>[]; lines: IPriceLine[] }>({ series: [], lines: [] });
   const drawRef = useRef(drawMode);
   const pendingRef = useRef<{ t: number; p: number } | null>(null);
+  const previewRef = useRef<ISeriesApi<any> | null>(null);
   const cbRef = useRef({ onPlaceHorizontal, onPlaceTrend });
 
+  function removePreview() { const c = chartRef.current, s = previewRef.current; if (c && s) { try { c.removeSeries(s); } catch {} } previewRef.current = null; }
+
   useEffect(() => { cbRef.current = { onPlaceHorizontal, onPlaceTrend }; });
-  useEffect(() => { drawRef.current = drawMode; if (!drawMode) { pendingRef.current = null; drawMarkers(); } }, [drawMode]);
+  useEffect(() => { drawRef.current = drawMode; if (!drawMode) { pendingRef.current = null; removePreview(); drawMarkers(); } }, [drawMode]);
 
   function drawMarkers() {
     const s = seriesRef.current; if (!s) return;
@@ -108,14 +111,26 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
       else {
         const a = pendingRef.current;
         cbRef.current.onPlaceTrend({ t1: a.t, p1: a.p, t2: t, p2: Number(price) });
-        pendingRef.current = null; drawMarkers();
+        pendingRef.current = null; removePreview(); drawMarkers();
       }
     };
     chart.subscribeClick(clickSub);
 
+    // Live rubber-band preview: after point A, the line follows the cursor until B.
+    const moveSub = (param: any) => {
+      const a = pendingRef.current;
+      if (drawRef.current !== "trend" || !a || !param.point) return;
+      const price = series.coordinateToPrice(param.point.y);
+      const t = (typeof param.time === "number" ? param.time : chart.timeScale().coordinateToTime(param.point.x)) as number | null;
+      if (price == null || t == null) return;
+      if (!previewRef.current) previewRef.current = chart.addSeries(LineSeries, { color: "#3b82f6", lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+      previewRef.current.setData([{ time: a.t, value: a.p }, { time: t, value: Number(price) }].sort((x, y) => (x.time as number) - (y.time as number)) as any);
+    };
+    chart.subscribeCrosshairMove(moveSub);
+
     const ro = new ResizeObserver(() => { if (wrapRef.current) chart.applyOptions({ width: wrapRef.current.clientWidth }); });
     ro.observe(wrapRef.current);
-    return () => { ro.disconnect(); chart.unsubscribeClick(clickSub); chart.remove(); chartRef.current = null; seriesRef.current = null; overlayRef.current = { series: [], lines: [] }; };
+    return () => { ro.disconnect(); chart.unsubscribeClick(clickSub); chart.unsubscribeCrosshairMove(moveSub); chart.remove(); chartRef.current = null; seriesRef.current = null; previewRef.current = null; overlayRef.current = { series: [], lines: [] }; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candles, height, timeframe]);
 

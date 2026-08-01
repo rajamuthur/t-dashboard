@@ -32,6 +32,18 @@ async def _monthly_job() -> None:
     await run_sync("month")
 
 
+async def _fo_verify_job() -> None:
+    """Weekly: force-refresh the Fyers F&O master so the F&O stock universe stays
+    current (SEBI adds/removes names periodically)."""
+    import asyncio
+    from ..fyers_fo_master import force_refresh
+    try:
+        n = await asyncio.to_thread(force_refresh)
+        logger.info("F&O list verified: %d stocks", n)
+    except Exception:
+        logger.exception("F&O verify failed")
+
+
 async def _alerts_job() -> None:
     """Evaluate chart alerts against live LTP (market-gated inside)."""
     from ..alert_watch import run_alert_check
@@ -87,6 +99,9 @@ def start_scheduler() -> None:
     )
     # Chart-alert watcher — interval (configurable, default 5 min), market-gated.
     _scheduler.add_job(_alerts_job, "interval", minutes=_get_alert_minutes_sync(), id="alerts_watch")
+
+    # Weekly F&O universe verification (Sunday 08:00 IST).
+    _scheduler.add_job(_fo_verify_job, "cron", day_of_week="sun", hour=8, minute=0, id="fo_verify")
 
     logger.info("Scheduler started. EOW job at %02d:%02d IST", hour, minute)
     _scheduler.start()

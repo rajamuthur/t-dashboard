@@ -49,16 +49,23 @@ async def _read_fo_cache(db_path: str) -> list[str]:
 
 
 async def get_fo_stocks() -> list[str]:
-    """Return F&O stock list: cached config → NSE live (validated) → env var.
+    """Return the current F&O stock list.
 
-    Cache-FIRST: the F&O list changes rarely, and NSE's equity-stockIndices API
-    is flaky/blocked from data-centre IPs (it intermittently returns a non-JSON
-    error page or a partial list). Hitting it on every scan stalled the run
-    ("Resolving universe…") and once yielded a truncated 50-symbol universe. So
-    we trust the cache when present and only fall back to a *validated* live
-    fetch, refreshing the cache when that succeeds.
+    PRIMARY: the Fyers F&O master (public CSV, token-free, auto-refreshed daily)
+    — the authoritative live list, so the count stays current (e.g. 208) instead
+    of the old hand/NSE cache that drifts stale (was 213 with 7 delisted names).
+    FALLBACK: the config cache → NSE live → env var, for when the master is
+    briefly unavailable.
     """
     db_path = _get_db_path()
+    try:
+        from .fyers_fo_master import fo_stock_symbols
+        stocks = await asyncio.to_thread(fo_stock_symbols)
+        if len(stocks) >= 100:
+            return stocks
+    except Exception:
+        pass
+
     cached = await _read_fo_cache(db_path)
     if len(cached) >= 100:
         return cached

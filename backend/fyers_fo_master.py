@@ -155,6 +155,25 @@ def fut_underlyings() -> list[str]:
     return sorted(get_fut_contracts().keys())
 
 
+# Index underlyings in the master — excluded from the F&O *stock* universe.
+_INDEX_UNDERLYINGS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50",
+                      "NIFTYNEXT50", "SENSEX", "BANKEX"}
+
+
+def fo_stock_symbols() -> list[str]:
+    """Current F&O stock universe as NSE:<UND>-EQ (indices excluded), from the
+    daily-refreshed Fyers master — the authoritative live list (vs a stale cache)."""
+    return sorted(f"NSE:{u}-EQ" for u in fut_underlyings() if u not in _INDEX_UNDERLYINGS)
+
+
+def force_refresh() -> int:
+    """Re-download the master (bypassing the 24h cache) and return the F&O stock
+    count. Used by the weekly verification job."""
+    global _lots, _futs
+    _lots, _futs = _refresh()
+    return len([u for u in _futs if u not in _INDEX_UNDERLYINGS])
+
+
 def lot_size(underlying: str) -> Optional[int]:
     return get_lot_sizes().get((underlying or "").strip().upper())
 

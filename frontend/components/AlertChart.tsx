@@ -85,7 +85,7 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
           const slope = (a.p2 - a.p1) / (a.t2 - a.t1);
           pts.push({ time: far as UTCTimestamp, value: a.p1 + slope * (far - a.t1) });
         }
-        const ls = chart.addSeries(LineSeries, { color: dim ? "#64748b" : color, lineWidth: 2, lineStyle: dim ? LineStyle.Dotted : LineStyle.Solid, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+        const ls = chart.addSeries(LineSeries, { color: dim ? "#64748b" : color, lineWidth: 2, lineStyle: dim ? LineStyle.Dotted : LineStyle.Solid, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null });
         ls.setData(pts as any);
         overlayRef.current.series.push(ls);
       }
@@ -145,7 +145,7 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
       const price = series.coordinateToPrice(param.point.y);
       const t = (typeof param.time === "number" ? param.time : chart.timeScale().coordinateToTime(param.point.x)) as number | null;
       if (price == null || t == null) return;
-      if (!previewRef.current) previewRef.current = chart.addSeries(LineSeries, { color: "#3b82f6", lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+      if (!previewRef.current) previewRef.current = chart.addSeries(LineSeries, { color: "#3b82f6", lineWidth: 2, lineStyle: LineStyle.Dashed, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null });
       previewRef.current.setData([{ time: a.t, value: a.p }, { time: t, value: Number(price) }].sort((x, y) => (x.time as number) - (y.time as number)) as any);
     };
     chart.subscribeCrosshairMove(moveSub);

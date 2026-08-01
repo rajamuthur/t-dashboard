@@ -22,6 +22,18 @@ function toTime(d: string): number {
   return Math.floor(Date.parse(d.includes(" ") ? d.replace(" ", "T") : d) / 1000);
 }
 
+const TF_STEP: Record<string, number> = { "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, day: 86400, week: 604800, month: 2629800 };
+function futureTimes(last: number, tf: string, n: number): number[] {
+  const step = TF_STEP[tf] || 86400;
+  const out: number[] = []; let t = last, guard = 0;
+  while (out.length < n && guard < n * 3) {
+    guard++; t += step;
+    if (tf === "day") { const d = new Date(t * 1000).getUTCDay(); if (d === 0 || d === 6) continue; }
+    out.push(t);
+  }
+  return out;
+}
+
 export default function AlertChart({ candles, alerts, drawMode, timeframe, onPlaceHorizontal, onPlaceTrend, height = 460 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -30,6 +42,7 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
   const drawRef = useRef(drawMode);
   const pendingRef = useRef<{ t: number; p: number } | null>(null);
   const previewRef = useRef<ISeriesApi<any> | null>(null);
+  const farRightRef = useRef<number>(0);
   const cbRef = useRef({ onPlaceHorizontal, onPlaceTrend });
 
   function removePreview() { const c = chartRef.current, s = previewRef.current; if (c && s) { try { c.removeSeries(s); } catch {} } previewRef.current = null; }
@@ -66,10 +79,11 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
         }));
       } else if (a.kind === "trend" && a.t1 != null && a.p1 != null && a.t2 != null && a.p2 != null && a.timeframe === timeframe) {
         const pts = [{ time: a.t1 as UTCTimestamp, value: a.p1 }, { time: a.t2 as UTCTimestamp, value: a.p2 }].sort((x, y) => (x.time as number) - (y.time as number));
-        // Extend to the right edge along the line.
-        if (a.t2 !== a.t1 && lastT > (pts[1].time as number)) {
+        // Project the line forward into the future zone (where the alert fires).
+        const far = farRightRef.current || lastT;
+        if (a.t2 !== a.t1 && far > (pts[pts.length - 1].time as number)) {
           const slope = (a.p2 - a.p1) / (a.t2 - a.t1);
-          pts.push({ time: lastT as UTCTimestamp, value: a.p1 + slope * (lastT - a.t1) });
+          pts.push({ time: far as UTCTimestamp, value: a.p1 + slope * (far - a.t1) });
         }
         const ls = chart.addSeries(LineSeries, { color: dim ? "#64748b" : color, lineWidth: 2, lineStyle: dim ? LineStyle.Dotted : LineStyle.Solid, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
         ls.setData(pts as any);
@@ -93,9 +107,17 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
       upColor: "#16a34a", downColor: "#dc2626", borderUpColor: "#16a34a", borderDownColor: "#dc2626",
       wickUpColor: "#16a34a", wickDownColor: "#dc2626",
     });
-    series.setData(candles.map(c => ({ time: toTime(c.date) as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close })) as any);
+    const lastReal = toTime(candles[candles.length - 1].date);
+    const nFut = timeframe === "month" ? 12 : timeframe === "week" ? 26 : 50;
+    const fut = futureTimes(lastReal, timeframe, nFut);
+    farRightRef.current = fut[fut.length - 1] ?? lastReal;
+    series.setData([
+      ...candles.map(c => ({ time: toTime(c.date) as UTCTimestamp, open: c.open, high: c.high, low: c.low, close: c.close })),
+      ...fut.map(t => ({ time: t as UTCTimestamp })),   // whitespace = future space
+    ] as any);
     chartRef.current = chart; seriesRef.current = series;
-    chart.timeScale().fitContent();
+    try { chart.timeScale().setVisibleRange({ from: toTime(candles[0].date) as any, to: (fut[Math.min(12, fut.length - 1)] ?? lastReal) as any }); }
+    catch { chart.timeScale().fitContent(); }
     drawOverlays();
 
     const clickSub = (param: any) => {
@@ -108,7 +130,7 @@ export default function AlertChart({ candles, alerts, drawMode, timeframe, onPla
       // trend: two clicks
       if (t == null) return;
       if (!pendingRef.current) { pendingRef.current = { t, p: Number(price) }; drawMarkers(); }
-      else {
+      else if (t !== pendingRef.current.t) {
         const a = pendingRef.current;
         cbRef.current.onPlaceTrend({ t1: a.t, p1: a.p, t2: t, p2: Number(price) });
         pendingRef.current = null; removePreview(); drawMarkers();

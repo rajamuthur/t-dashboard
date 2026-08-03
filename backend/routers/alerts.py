@@ -21,9 +21,10 @@ _COLS = ("id", "symbol", "name", "timeframe", "kind", "condition", "repeat_mode"
          "price", "t1", "p1", "t2", "p2", "note", "status", "last_diff",
          "created_at", "triggered_at")
 
-# timeframe -> (Fyers resolution, calendar days). week/month fetch daily then resample.
-_RES = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "day": "D", "week": "D", "month": "D"}
-_RANGE_DAYS = {"5m": 25, "15m": 50, "30m": 80, "1h": 100, "day": 360, "week": 360, "month": 360}
+# timeframe -> (Fyers resolution, calendar days). 1wk/1mo fetch daily then resample.
+# Keys match the fyers chart source so the Alerts chart and alerts agree.
+_RES = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "1d": "D", "1wk": "D", "1mo": "D"}
+_RANGE_DAYS = {"5m": 25, "15m": 50, "30m": 80, "1h": 100, "1d": 360, "1wk": 360, "1mo": 360}
 _TF = set(_RES.keys())
 
 
@@ -224,9 +225,9 @@ def _chart_candles(symbol: str, timeframe: str) -> list[dict]:
     df = d.fetch_daily(symbol, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), resolution=res)
     if df is None or df.empty:
         return []
-    if timeframe == "week":
+    if timeframe == "1wk":
         df = d.resample_weekly(df)
-    elif timeframe == "month":
+    elif timeframe == "1mo":
         df = d.resample_monthly(df)
     intraday = timeframe in ("5m", "15m", "30m", "1h")
     fmt = "%Y-%m-%d %H:%M:%S" if intraday else "%Y-%m-%d"

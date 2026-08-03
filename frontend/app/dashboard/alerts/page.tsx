@@ -1,16 +1,16 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, Plus, Minus, X, Pencil, Trash2, RotateCcw, Search, Check, AlertTriangle } from "lucide-react";
-import AlertChart from "@/components/AlertChart";
-import { searchSymbols, SymbolMatch } from "@/lib/liveSources";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Bell, X, Pencil, Trash2, RotateCcw, Search, Check, AlertTriangle } from "lucide-react";
+import ChartsChart, { RefLine } from "@/components/ChartsChart";
+import { searchSymbols, SymbolMatch, getLiveCandles } from "@/lib/liveSources";
 import {
   AlertRow, AlertSymbol, AlertNotification, AlertCond, AlertRepeat, CreateAlertBody,
   listAlerts, getAlertSymbols, createAlert, updateAlert, deleteAlert,
-  getAlertNotifications, getAlertConfig, setAlertConfig, getAlertChart,
+  getAlertNotifications, getAlertConfig, setAlertConfig,
 } from "@/lib/alertsApi";
 
-const TIMEFRAMES = ["5m", "15m", "30m", "1h", "day", "week", "month"];
-const TF_LABEL: Record<string, string> = { "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", day: "1D", week: "1W", month: "1M" };
+const TIMEFRAMES = ["5m", "15m", "1h", "1d", "1wk", "1mo"];
+const TF_LABEL: Record<string, string> = { "5m": "5m", "15m": "15m", "1h": "1h", "1d": "1D", "1wk": "1W", "1mo": "1M" };
 const POLL_MS = 30_000;
 
 type Draft = {
@@ -25,12 +25,11 @@ const short = (s: string) => s.replace("NSE:", "").replace("-EQ", "");
 export default function AlertsPage() {
   const [symbols, setSymbols] = useState<AlertSymbol[]>([]);
   const [symbol, setSymbol] = useState<string>("");
-  const [timeframe, setTimeframe] = useState("day");
+  const [timeframe, setTimeframe] = useState("1d");
   const [candles, setCandles] = useState<any[]>([]);
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [notifs, setNotifs] = useState<AlertNotification[]>([]);
   const [loadingChart, setLoadingChart] = useState(false);
-  const [drawMode, setDrawMode] = useState<null | "horizontal" | "trend">(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [checkMin, setCheckMin] = useState(5);
@@ -50,7 +49,7 @@ export default function AlertsPage() {
   const loadChart = useCallback(async (sym: string, tf: string) => {
     if (!sym) { setCandles([]); return; }
     setLoadingChart(true);
-    try { const r = await getAlertChart(sym, tf); setCandles(r.candles || []); }
+    try { setCandles(await getLiveCandles("fyers", sym, tf, 400)); }
     catch { setCandles([]); } finally { setLoadingChart(false); }
   }, []);
 
@@ -82,16 +81,31 @@ export default function AlertsPage() {
     return () => { cancelled = true; window.clearTimeout(h); };
   }, [symDraft]);
 
-  function chooseSymbol(s: string) { setSymbol(s.trim().toUpperCase()); setSymDraft(""); setSugg([]); setDrawMode(null); }
+  function chooseSymbol(s: string) { setSymbol(s.trim().toUpperCase()); setSymDraft(""); setSugg([]); }
 
-  function openHorizontal(price: number) {
-    setDrawMode(null);
-    setDraft({ kind: "horizontal", price: Number(price.toFixed(2)), name: "", condition: "cross_up", repeat: "once", note: "" });
-  }
-  function openTrend(a: { t1: number; p1: number; t2: number; p2: number }) {
-    setDrawMode(null);
-    setDraft({ kind: "trend", ...a, name: "", condition: "cross_up", repeat: "once", note: "" });
-  }
+  // Existing alerts rendered as non-interactive reference lines on the chart.
+  const refLines = useMemo<RefLine[]>(() => alerts.map(a => {
+    const active = a.status === "active";
+    const color = !active ? "#94a3b8" : a.condition === "cross_up" ? "#16a34a" : "#dc2626";
+    return a.kind === "horizontal"
+      ? { kind: "hline", price: a.price ?? undefined, color, dashed: !active, label: (a.name || "alert") + (active ? "" : " ✓") }
+      : { kind: "trend", t1: a.t1 ?? undefined, p1: a.p1 ?? undefined, t2: a.t2 ?? undefined, p2: a.p2 ?? undefined, color, dashed: !active, label: a.name || "alert", timeframe: a.timeframe };
+  }), [alerts]);
+
+  // Draw a line → click it → "+ Alert": create a server alert from the drawing's geometry.
+  const onCreateAlert = useCallback(async (d: any, condition: AlertCond, repeat: AlertRepeat) => {
+    try {
+      const body: CreateAlertBody = {
+        symbol, timeframe, condition, repeat_mode: repeat,
+        kind: d.kind === "trend" ? "trend" : "horizontal",
+        ...(d.kind === "trend" ? { t1: d.t1, p1: d.p1, t2: d.t2, p2: d.p2 } : { price: d.price }),
+      };
+      await createAlert(body);
+      await loadAlerts(symbol); getAlertSymbols().then(setSymbols).catch(() => {});
+      setMsg("Alert created"); setTimeout(() => setMsg(null), 2000);
+      return true;
+    } catch (e: any) { setMsg((e?.message || "Create failed").replace(/^API \d+:\s*/, "")); return false; }
+  }, [symbol, timeframe, loadAlerts]);
 
   async function saveDraft() {
     if (!draft) return;
@@ -175,21 +189,12 @@ export default function AlertsPage() {
                 <button key={tf} onClick={() => setTimeframe(tf)} className={`px-2 py-1 ${timeframe === tf ? "bg-brand-600 text-white" : "bg-gray-800 text-gray-300 hover:text-white"}`}>{TF_LABEL[tf]}</button>
               ))}
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
-              <button onClick={() => setDrawMode(drawMode === "horizontal" ? null : "horizontal")} disabled={!symbol}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs border disabled:opacity-40 ${drawMode === "horizontal" ? "bg-brand-600 border-brand-500 text-white" : "bg-gray-800 border-gray-700 text-gray-300 hover:text-white"}`}>
-                <Minus size={13} /> Horizontal line
-              </button>
-              <button onClick={() => setDrawMode(drawMode === "trend" ? null : "trend")} disabled={!symbol}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs border disabled:opacity-40 ${drawMode === "trend" ? "bg-brand-600 border-brand-500 text-white" : "bg-gray-800 border-gray-700 text-gray-300 hover:text-white"}`}>
-                <Plus size={13} /> Trendline
-              </button>
-              {drawMode && <button onClick={() => setDrawMode(null)} className="px-2 py-1 rounded text-xs border border-gray-700 text-gray-400 hover:text-white">cancel</button>}
-            </div>
+            <span className="ml-auto text-[11px] text-gray-400">draw a line → click it → <b className="text-blue-400">+ Alert</b></span>
           </div>
 
-          {loadingChart ? <div className="h-[460px] flex items-center justify-center text-gray-500 text-sm bg-gray-900 rounded-lg border border-gray-800">Loading chart…</div>
-            : <AlertChart candles={candles} alerts={alerts} drawMode={drawMode} timeframe={timeframe} onPlaceHorizontal={openHorizontal} onPlaceTrend={openTrend} />}
+          {loadingChart ? <div className="h-[520px] flex items-center justify-center text-gray-500 text-sm bg-gray-900 rounded-lg border border-gray-800">Loading chart…</div>
+            : symbol ? <ChartsChart candles={candles} symbol={symbol} timeframe={timeframe} height={520} lsPrefix="alertdraw" refLines={refLines} onCreateAlert={onCreateAlert} />
+            : <div className="h-[520px] flex items-center justify-center text-gray-500 text-sm bg-white rounded-lg border border-gray-200">Pick a stock to chart.</div>}
 
           {/* Alerts table */}
           <div className="rounded-lg border border-gray-800 bg-gray-900 overflow-x-auto">

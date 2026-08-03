@@ -9,14 +9,20 @@ import { LiveCandle } from "@/lib/liveSources";
 
 type Tool = null | "trend" | "hline" | "hray";
 interface Drawing { id: string; kind: "trend" | "hline" | "hray"; color: string; width: number; timeframe: string; price?: number; t1?: number; p1?: number; t2?: number; p2?: number; }
-interface Props { candles: LiveCandle[]; symbol: string; timeframe: string; livePrice?: number | null; height?: number; }
+export interface RefLine { kind: "hline" | "trend"; color: string; label?: string; dashed?: boolean; price?: number; t1?: number; p1?: number; t2?: number; p2?: number; timeframe?: string; }
+interface Props {
+  candles: LiveCandle[]; symbol: string; timeframe: string; livePrice?: number | null; height?: number;
+  lsPrefix?: string;                                             // localStorage namespace for drawings
+  refLines?: RefLine[];                                          // non-interactive lines (e.g. existing alerts)
+  onCreateAlert?: (d: Drawing, condition: "cross_up" | "cross_down", repeat: "once" | "recurring") => Promise<boolean>;
+}
 
 const COLORS = ["#111827", "#2563eb", "#dc2626", "#16a34a", "#d97706", "#0891b2"];   // black default
 const NO_AUTOSCALE = () => null;   // overlays must NOT drive the price scale (else it explodes to 1e37)
-const lsKey = (sym: string) => `charts:draw:${sym}`;
-function loadDrawings(sym: string): Drawing[] {
+const lsKey = (prefix: string, sym: string) => `${prefix}:${sym}`;
+function loadDrawings(prefix: string, sym: string): Drawing[] {
   if (typeof window === "undefined" || !sym) return [];
-  try { const r = JSON.parse(window.localStorage.getItem(lsKey(sym)) || "[]"); return Array.isArray(r) ? r : []; } catch { return []; }
+  try { const r = JSON.parse(window.localStorage.getItem(lsKey(prefix, sym)) || "[]"); return Array.isArray(r) ? r : []; } catch { return []; }
 }
 
 const TF_STEP: Record<string, number> = { "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "1d": 86400, "1wk": 604800, "1mo": 2629800 };
@@ -27,7 +33,7 @@ function futureTimes(last: number, tf: string, n: number): number[] {
   return out;
 }
 
-export default function ChartsChart({ candles, symbol, timeframe, livePrice, height = 520 }: Props) {
+export default function ChartsChart({ candles, symbol, timeframe, livePrice, height = 520, lsPrefix = "charts:draw", refLines, onCreateAlert }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -49,10 +55,13 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
   const [handles, setHandles] = useState<{ x: number; y: number; idx: number }[]>([]);
   const [fs, setFs] = useState(false);
   const [hint, setHint] = useState("");
+  const [alertCond, setAlertCond] = useState<"cross_up" | "cross_down">("cross_up");
+  const [alertRepeat, setAlertRepeat] = useState<"once" | "recurring">("once");
+  const [creatingAlert, setCreatingAlert] = useState(false);
 
   useEffect(() => { styleRef.current = { color, width }; }, [color, width]);
   useEffect(() => { drawingsRef.current = drawings; }, [drawings]);
-  useEffect(() => { setDrawings(loadDrawings(symbol)); cancelDraw(); setSelectedId(null); }, [symbol]);
+  useEffect(() => { setDrawings(loadDrawings(lsPrefix, symbol)); cancelDraw(); setSelectedId(null); }, [symbol, lsPrefix]);
   useEffect(() => {
     toolRef.current = tool;
     if (tool) setSelectedId(null);
@@ -60,9 +69,11 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
     else setHint(tool === "trend" ? "click point A" : tool === "hray" ? "click to place a ray" : "click to place a line");
   }, [tool]);
 
-  function persist(next: Drawing[]) { setDrawings(next); try { window.localStorage.setItem(lsKey(symbol), JSON.stringify(next)); } catch {} }
+  function persist(next: Drawing[]) { setDrawings(next); try { window.localStorage.setItem(lsKey(lsPrefix, symbol), JSON.stringify(next)); } catch {} }
   function add(d: Omit<Drawing, "id" | "color" | "width" | "timeframe">) {
-    persist([...loadDrawings(symbol), { ...d, id: `${Date.now()}_${Math.floor(performance.now())}`, color: styleRef.current.color, width: styleRef.current.width, timeframe }]);
+    const nd = { ...d, id: `${Date.now()}_${Math.floor(performance.now())}`, color: styleRef.current.color, width: styleRef.current.width, timeframe };
+    persist([...loadDrawings(lsPrefix, symbol), nd]);
+    if (onCreateAlert) setSelectedId(nd.id);   // alerts page: select the fresh line so you can attach an alert
   }
   function updateDrawing(id: string, patch: Partial<Drawing>) { persist(drawings.map(d => d.id === id ? { ...d, ...patch } : d)); }
   function removePreview() { const c = chartRef.current, s = previewRef.current; if (c && s) { try { c.removeSeries(s); } catch {} } previewRef.current = null; }
@@ -92,7 +103,20 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
         overlayRef.current.series.push(ls);
       }
     }
-  }, [drawings, candles, timeframe]);
+    // Non-interactive reference lines (e.g. existing alerts).
+    for (const r of (refLines || [])) {
+      if (r.kind === "hline" && r.price != null) {
+        overlayRef.current.lines.push(s.createPriceLine({ price: r.price, color: r.color, lineWidth: 2, lineStyle: r.dashed ? LineStyle.Dotted : LineStyle.Solid, axisLabelVisible: true, title: r.label || "" }));
+      } else if (r.kind === "trend" && r.t1 != null && r.p1 != null && r.t2 != null && r.p2 != null && r.t1 !== r.t2 && (r.timeframe == null || r.timeframe === timeframe)) {
+        const pts = [{ time: r.t1, value: r.p1 }, { time: r.t2, value: r.p2 }].sort((a, b) => a.time - b.time);
+        const slope = (r.p2 - r.p1) / (r.t2 - r.t1); const far = farRight();
+        if (far > pts[pts.length - 1].time) pts.push({ time: far, value: r.p1 + slope * (far - r.t1) });   // project forward (where the alert fires)
+        const ls = chart.addSeries(LineSeries, { color: r.color, lineWidth: 2, lineStyle: r.dashed ? LineStyle.Dashed : LineStyle.Solid, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: NO_AUTOSCALE });
+        ls.setData(pts as any);
+        overlayRef.current.series.push(ls);
+      }
+    }
+  }, [drawings, candles, timeframe, refLines]);
 
   const farRef = useRef<number>(0);
   const farRight = () => farRef.current;
@@ -234,7 +258,7 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
     chartRef.current?.applyOptions({ handleScroll: true, handleScale: true });
     window.removeEventListener("mousemove", onDragMove);
     window.removeEventListener("mouseup", onDragUp);
-    setDrawings(prev => { try { window.localStorage.setItem(lsKey(symbol), JSON.stringify(prev)); } catch {} return prev; });
+    setDrawings(prev => { try { window.localStorage.setItem(lsKey(lsPrefix, symbol), JSON.stringify(prev)); } catch {} return prev; });
   }
   function startDrag(id: string, idx: number, e: React.MouseEvent) {
     e.stopPropagation(); e.preventDefault();
@@ -275,6 +299,21 @@ export default function ChartsChart({ candles, symbol, timeframe, livePrice, hei
             {(selected.kind === "hline" || selected.kind === "hray") && <input type="number" step="any" value={selected.price ?? 0} onChange={e => updateDrawing(selected.id, { price: parseFloat(e.target.value) || 0 })} className="w-24 border border-gray-300 rounded px-1 py-0.5" title="Price level" />}
             <button onClick={() => { persist(drawings.filter(x => x.id !== selected.id)); setSelectedId(null); }} className="ml-auto flex items-center gap-1 text-red-500 hover:text-red-700"><Trash2 size={13} /> delete</button>
           </div>
+          {onCreateAlert && (
+            <div className="flex items-center gap-1.5 border-t border-gray-200 pt-1.5">
+              <select value={alertCond} onChange={e => setAlertCond(e.target.value as any)} className="border border-gray-300 rounded px-1 py-0.5">
+                <option value="cross_up">crosses ↑</option><option value="cross_down">crosses ↓</option>
+              </select>
+              <select value={alertRepeat} onChange={e => setAlertRepeat(e.target.value as any)} className="border border-gray-300 rounded px-1 py-0.5">
+                <option value="once">once</option><option value="recurring">re-cross</option>
+              </select>
+              <button disabled={creatingAlert} onClick={async () => {
+                setCreatingAlert(true);
+                try { const ok = await onCreateAlert(selected, alertCond, alertRepeat); if (ok) { persist(drawings.filter(x => x.id !== selected.id)); setSelectedId(null); } }
+                finally { setCreatingAlert(false); }
+              }} className="ml-auto px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50">{creatingAlert ? "…" : "+ Alert"}</button>
+            </div>
+          )}
         </div>
       )}
 

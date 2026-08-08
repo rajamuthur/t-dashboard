@@ -425,11 +425,21 @@ class FyersSource(DataSource):
     _RANGE_DAYS = {"5m": 30, "15m": 60, "30m": 90, "1h": 100, "1d": 360, "1wk": 360, "1mo": 360}
     _universe_cache: Optional[List[str]] = None
 
+    @staticmethod
+    def _qualify(symbol: str) -> str:
+        """Fyers needs a fully-qualified symbol (NSE:360ONE-EQ). A bare name the
+        user typed (360ONE) returns 0 candles silently, so treat anything without
+        an exchange prefix as an NSE equity. Already-qualified symbols
+        (indices NSE:...-INDEX, futures NSE:...FUT) pass through untouched."""
+        s = symbol.strip().upper()
+        return s if ":" in s else f"NSE:{s}-EQ"
+
     async def fetch_candles(self, symbol: str, timeframe: str, limit: int = 300) -> List[Candle]:
         from .downloaders.fyers import FyersDownloader
         from datetime import datetime, timedelta
         res = self._RES.get(timeframe, "D")
         days = self._RANGE_DAYS.get(timeframe, 360)
+        symbol = self._qualify(symbol)
 
         def _fetch():
             d = FyersDownloader()
@@ -460,6 +470,7 @@ class FyersSource(DataSource):
 
     async def fetch_quote(self, symbol: str) -> Optional[Quote]:
         from .downloaders.fyers import FyersDownloader
+        symbol = self._qualify(symbol)
 
         def _fetch():
             return FyersDownloader().quote(symbol)

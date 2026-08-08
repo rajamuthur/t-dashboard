@@ -27,10 +27,25 @@ class FyersDownloader:
         self._fyers  = self._build_client()
 
     @staticmethod
+    def _token_exp(tok: str) -> int:
+        """Unix-epoch expiry from a Fyers access token (a JWT); 0 if unparseable."""
+        import base64
+        import json
+        try:
+            p = tok.split(".")
+            pl = p[1] + "=" * (-len(p[1]) % 4)
+            return int(json.loads(base64.urlsafe_b64decode(pl)).get("exp", 0) or 0)
+        except Exception:
+            return 0
+
+    @staticmethod
     def _load_access_token() -> str:
-        """Prefer a token pasted at runtime via Settings (config table), so the
-        daily Fyers re-login is a paste — no .env edit / restart. Falls back to
-        the ACCESS_TOKEN env var."""
+        """The access token, read from BOTH the DB (config.fyers_token, set via
+        Settings) and .env (ACCESS_TOKEN, set by the auto-login). These can
+        diverge if one write fails (e.g. a DB lock), so use whichever token is
+        valid LONGER — that self-heals a stale store instead of serving an
+        expired token."""
+        db_tok = ""
         try:
             import json
             import sqlite3
@@ -39,12 +54,11 @@ class FyersDownloader:
             row = con.execute("SELECT value FROM config WHERE key='fyers_token'").fetchone()
             con.close()
             if row and row[0]:
-                tok = json.loads(row[0])
-                if tok:
-                    return str(tok).strip()
+                db_tok = str(json.loads(row[0]) or "").strip()
         except Exception:
             pass
-        return os.getenv("ACCESS_TOKEN", "")
+        env_tok = os.getenv("ACCESS_TOKEN", "").strip()
+        return db_tok if FyersDownloader._token_exp(db_tok) >= FyersDownloader._token_exp(env_tok) else env_tok
 
     def _build_client(self):
         return fyersModel.FyersModel(

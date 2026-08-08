@@ -72,9 +72,24 @@ def _save_token(token: str) -> None:
         pass  # .env write already succeeded; DB is best-effort
 
 
+def _token_exp(tok: str) -> int:
+    """Unix-epoch expiry from a Fyers access token (a JWT); 0 if unparseable."""
+    import base64
+    import json
+    try:
+        p = tok.split(".")
+        pl = p[1] + "=" * (-len(p[1]) % 4)
+        return int(json.loads(base64.urlsafe_b64decode(pl)).get("exp", 0) or 0)
+    except Exception:
+        return 0
+
+
 def _effective_token() -> str:
-    """The token the app actually uses: DB `config.fyers_token` first, else .env.
-    Mirrors FyersDownloader._load_access_token so the badge/expiry match reality."""
+    """The token the app actually uses. Read from BOTH DB (config.fyers_token)
+    and .env (ACCESS_TOKEN) and return whichever is valid LONGER, so the
+    badge/expiry match reality even if the two stores diverged (a failed write
+    to one). Mirrors FyersDownloader._load_access_token."""
+    db_tok = ""
     try:
         import json
         import sqlite3
@@ -83,14 +98,13 @@ def _effective_token() -> str:
         row = con.execute("SELECT value FROM config WHERE key='fyers_token'").fetchone()
         con.close()
         if row and row[0]:
-            tok = json.loads(row[0])
-            if tok:
-                return str(tok).strip()
+            db_tok = str(json.loads(row[0]) or "").strip()
     except Exception:
         pass
     from dotenv import load_dotenv
     load_dotenv(override=True)
-    return os.getenv("ACCESS_TOKEN", "")
+    env_tok = os.getenv("ACCESS_TOKEN", "").strip()
+    return db_tok if _token_exp(db_tok) >= _token_exp(env_tok) else env_tok
 
 
 def auto_login() -> dict:

@@ -78,7 +78,7 @@ async def check_alerts() -> dict:
 
 
 async def _fire(db, a: dict, ltp: float, level: float, direction: str, ts: str) -> None:
-    from .telegram_service import send_message
+    from .telegram_service import send_message, send_photo
     arrow = "\U0001F53C" if direction == "up" else "\U0001F53D"
     header = f"\U0001F514 <b>{html.escape(_short(a['symbol']))}</b> {arrow} crossed " \
              f"{'above' if direction == 'up' else 'below'} {round(level, 2)} (LTP {round(ltp, 2)})"
@@ -86,10 +86,25 @@ async def _fire(db, a: dict, ltp: float, level: float, direction: str, ts: str) 
     msg = header + body
     res = await send_message(msg)
     delivered = 1 if res.get("ok") else 0
+    err = res.get("error")
+
+    # Chart image as a follow-up message. Best-effort — a render/send failure must
+    # not affect the (already-delivered) text alert or the alert's status update.
+    if delivered:
+        try:
+            from .alerts_image import render_alert_png
+            png = await asyncio.to_thread(render_alert_png, a, ltp, level, direction)
+            if png:
+                photo = await send_photo(png, caption="")
+                if not photo.get("ok"):
+                    err = err or f"chart: {photo.get('error')}"
+        except Exception as exc:  # pragma: no cover - defensive
+            err = err or f"chart: {exc}"
+
     await db.execute(
         "INSERT INTO alert_notifications (alert_id, symbol, triggered_at, price, line_value, direction, message, delivered, error)"
         " VALUES (?,?,?,?,?,?,?,?,?)",
-        [a["id"], a["symbol"], ts, round(ltp, 2), round(level, 2), direction, msg, delivered, res.get("error")],
+        [a["id"], a["symbol"], ts, round(ltp, 2), round(level, 2), direction, msg, delivered, err],
     )
     if a.get("repeat_mode") == "once":
         await db.execute("UPDATE alerts SET status='triggered', triggered_at=? WHERE id=?", [ts, a["id"]])

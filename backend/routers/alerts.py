@@ -3,29 +3,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiosqlite
-import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..auth import get_current_user
 from ..db import get_db, _get_db_path
 from ..alert_watch import line_value
+from ..alerts_image import TIMEFRAMES as _TF, fetch_alert_candles
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 _COLS = ("id", "symbol", "name", "timeframe", "kind", "condition", "repeat_mode",
          "price", "t1", "p1", "t2", "p2", "note", "status", "last_diff",
          "created_at", "triggered_at")
-
-# timeframe -> (Fyers resolution, calendar days). 1wk/1mo fetch daily then resample.
-# Keys match the fyers chart source so the Alerts chart and alerts agree.
-_RES = {"5m": "5", "15m": "15", "30m": "30", "1h": "60", "1d": "D", "1wk": "D", "1mo": "D"}
-_RANGE_DAYS = {"5m": 25, "15m": 50, "30m": 80, "1h": 100, "1d": 360, "1wk": 360, "1mo": 360}
-_TF = set(_RES.keys())
 
 
 def _now_unix() -> float:
@@ -215,29 +209,6 @@ async def set_config(payload: ConfigIn, db: aiosqlite.Connection = Depends(get_d
 # --------------------------------------------------------------------------
 # Chart candles (per timeframe)
 # --------------------------------------------------------------------------
-def _chart_candles(symbol: str, timeframe: str) -> list[dict]:
-    from ..downloaders.fyers import FyersDownloader
-    res = _RES.get(timeframe, "D")
-    days = _RANGE_DAYS.get(timeframe, 360)
-    d = FyersDownloader()
-    end = datetime.now()
-    start = end - timedelta(days=days)
-    df = d.fetch_daily(symbol, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), resolution=res)
-    if df is None or df.empty:
-        return []
-    if timeframe == "1wk":
-        df = d.resample_weekly(df)
-    elif timeframe == "1mo":
-        df = d.resample_monthly(df)
-    intraday = timeframe in ("5m", "15m", "30m", "1h")
-    fmt = "%Y-%m-%d %H:%M:%S" if intraday else "%Y-%m-%d"
-    out = []
-    for ts, r in df.iterrows():
-        out.append({"date": pd.Timestamp(ts).strftime(fmt), "open": float(r["open"]), "high": float(r["high"]),
-                    "low": float(r["low"]), "close": float(r["close"]), "volume": float(r.get("volume", 0) or 0)})
-    return out[-1500:]
-
-
 @router.get("/chart")
 async def chart(
     symbol: str = Query(...),
@@ -246,5 +217,5 @@ async def chart(
 ):
     if timeframe not in _TF:
         raise HTTPException(400, f"Unsupported timeframe: {timeframe}")
-    candles = await asyncio.to_thread(_chart_candles, symbol.strip().upper(), timeframe)
+    candles = await asyncio.to_thread(fetch_alert_candles, symbol.strip().upper(), timeframe)
     return {"candles": candles}

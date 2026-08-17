@@ -57,3 +57,12 @@ urllib3==2.6.3
 uvicorn==0.32.0
 websocket-client==1.9.0
 yarl==1.23.0
+# Chart-image rendering for pattern scanner + alert Telegram charts (chart_render.py, alerts_image.py)
+matplotlib==3.11.0
+mplfinance==0.12.10b0
+contourpy==1.3.3
+cycler==0.12.1
+fonttools==4.63.0
+kiwisolver==1.5.0
+pillow==12.2.0
+pyparsing==3.3.2

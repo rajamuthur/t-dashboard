@@ -23,6 +23,9 @@ class PnlConfigIn(BaseModel):
     base_check_min: Optional[int] = Field(None, ge=1, le=60)
     eod_time: Optional[str] = Field(None, pattern=r"^([01]?\d|2[0-3]):[0-5]\d$")
     expiry_trading_days: Optional[int] = Field(None, ge=0, le=60)
+    spike_enabled: Optional[bool] = None
+    spike_pct: Optional[float] = Field(None, ge=0.1, le=50)
+    spike_window_min: Optional[int] = Field(None, ge=1, le=240)
 
 
 @router.get("/config")

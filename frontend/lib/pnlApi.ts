@@ -31,6 +31,9 @@ export interface PnlConfig {
   base_check_min: number;
   eod_time: string;          // "HH:MM"
   expiry_trading_days: number;
+  spike_enabled: boolean;
+  spike_pct: number;
+  spike_window_min: number;
 }
 
 export interface PnlNotification {

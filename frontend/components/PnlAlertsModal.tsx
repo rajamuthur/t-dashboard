@@ -93,6 +93,23 @@ export default function PnlAlertsModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
 
+            {/* Sudden move */}
+            <div className="rounded-lg border border-gray-800 p-3 space-y-2">
+              <label className="flex items-center gap-2 text-amber-400 font-medium text-xs uppercase tracking-wider">
+                <input type="checkbox" checked={cfg.spike_enabled} onChange={e => set("spike_enabled", e.target.checked)} className="accent-amber-500" />
+                Sudden move alert 🚨
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Move ≥ (%)">
+                  <input type="number" step="0.1" value={cfg.spike_pct} onChange={e => set("spike_pct", num(e.target.value))} className={inp} />
+                </Field>
+                <Field label="Within (min)">
+                  <input type="number" value={cfg.spike_window_min} onChange={e => set("spike_window_min", num(e.target.value, 1))} className={inp} />
+                </Field>
+              </div>
+              <p className="text-[10px] text-gray-500">Fires when a position's underlying spot or its contract moves this much in the window (whichever moves more). Re-alerts at most once per window per stock.</p>
+            </div>
+
             {/* Other */}
             <div className="grid grid-cols-3 gap-3">
               <Field label="Check every (min)">

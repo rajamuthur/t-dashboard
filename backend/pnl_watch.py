@@ -36,6 +36,9 @@ DEFAULT_CFG = {
     "base_check_min": 5,            # how often the watcher ticks (<= min interval)
     "eod_time": "16:00",            # HH:MM IST for the daily summary
     "expiry_trading_days": 10,      # warn when an F&O position has <= this many trading days left
+    "spike_enabled": True,          # sudden-move alert on trades-page stocks
+    "spike_pct": 2.0,               # |move %| over the window that triggers a spike alert
+    "spike_window_min": 15,         # rolling window for the move; also the per-stock re-alert gate
 }
 
 _CFG_KEY = "pnl_alert_config"
@@ -226,12 +229,12 @@ async def _fire_threshold(db, trade: dict, info: dict, kind: str, now: datetime)
     )
 
 
-async def check_pnl() -> dict:
+async def check_pnl(cfg: dict | None = None) -> dict:
     """Evaluate every open position; fire profit/loss threshold alerts. Not
     market-gated itself — run_pnl_check() gates."""
     from .routers.trades import _TRADE_COLS, _pnl, _refresh_trade
 
-    cfg = await get_config()
+    cfg = cfg or await get_config()
     if not cfg["enabled"]:
         return {"skipped": "disabled"}
 
@@ -276,12 +279,163 @@ async def check_pnl() -> dict:
 
 
 async def run_pnl_check() -> dict:
-    """Market-gated entry point used by the scheduler."""
+    """Market-gated entry point used by the scheduler: threshold + spike alerts."""
     from .futures_scan import market_open
     is_open, reason = await market_open()
     if not is_open:
         return {"skipped": reason}
-    return await check_pnl()
+    cfg = await get_config()
+    pnl_res = await check_pnl(cfg)
+    spike_res = await check_spikes(cfg)
+    return {"pnl": pnl_res, "spikes": spike_res}
+
+
+# ---------------------------------------------------------------------------
+# Sudden-move (spike) alerts
+# ---------------------------------------------------------------------------
+def _spike_ref_close(candles: list[dict], window_min: int) -> float | None:
+    """Close of the newest SAME-SESSION 5m candle at/before (now - window). None if
+    there isn't enough intraday history yet (so we never compare across the
+    overnight gap, which would fire false spikes at the open)."""
+    if len(candles) < 2:
+        return None
+    fmt = "%Y-%m-%d %H:%M:%S"
+    try:
+        last = datetime.strptime(candles[-1]["date"], fmt)
+    except Exception:
+        return None
+    target = last - timedelta(minutes=window_min)
+    for c in reversed(candles[:-1]):
+        try:
+            ct = datetime.strptime(c["date"], fmt)
+        except Exception:
+            continue
+        if ct.date() != last.date():
+            break                      # crossed into the previous session — stop
+        if ct <= target:
+            return float(c["close"])
+    return None
+
+
+def render_spike_png(label: str, candles: list[dict], ltp: float, pct: float, window_min: int) -> bytes | None:
+    """Intraday 5m chart of the moving stock with a marker at the current price."""
+    from .chart_render import render_pattern_png
+    if not candles:
+        return None
+    c = candles[-80:]
+    color = "#16a34a" if pct >= 0 else "#dc2626"
+    shapes = [{"type": "marker", "date": c[-1]["date"], "price": float(ltp), "color": color}]
+    arrow = "▲" if pct >= 0 else "▼"
+    title = f"{label}  {arrow}{abs(round(pct, 2))}% in {window_min}m  (LTP {round(ltp, 2)})"
+    try:
+        return render_pattern_png(label, c, shapes, title)
+    except Exception:
+        return None
+
+
+async def _fire_spike(db, t: dict, trig: tuple, window_min: int, now: datetime) -> None:
+    from .telegram_service import send_message, send_photo
+    from .routers.trades import _pnl, _qty
+
+    basis, sym, pct, ltp, candles = trig
+    arrow = "\U0001F53A" if pct >= 0 else "\U0001F53B"   # 🔺 / 🔻
+    book = (t.get("mode") or "actual").upper()
+    label = _label(t)
+    info = _pnl(t)
+    psign = "+" if info["pnl"] >= 0 else "−"
+    ts = now.isoformat(timespec="seconds")
+    msg = (
+        f"\U0001F6A8 <b>SUDDEN MOVE</b> {arrow} <b>{html.escape(label)}</b> [{book}]\n"
+        f"{'+' if pct >= 0 else ''}{round(pct, 2)}% in {window_min}m ({basis}) · LTP {round(ltp, 2)}\n"
+        f"Position P&L {psign}₹{_inr(abs(info['pnl']))} ({round(info['pnl_pct'], 2)}%) · qty {_qty(t)}"
+    )
+    res = await send_message(msg)
+    delivered = 1 if res.get("ok") else 0
+    err = res.get("error")
+    if delivered:
+        # Title the chart by what's actually plotted (spot series vs contract series).
+        chart_label = (sym.split(":")[-1].replace("-EQ", "").replace("-INDEX", "")
+                       if basis == "spot" else (t.get("symbol") or label))
+        try:
+            png = await asyncio.to_thread(render_spike_png, chart_label, candles, ltp, pct, window_min)
+            if png:
+                photo = await send_photo(png, caption="")
+                if not photo.get("ok"):
+                    err = err or f"chart: {photo.get('error')}"
+        except Exception as exc:  # pragma: no cover - defensive
+            err = err or f"chart: {exc}"
+    await db.execute(
+        "INSERT INTO pnl_notifications (trade_id, symbol, mode, kind, triggered_at, pnl, pnl_pct, price, message, delivered, error)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        [t["id"], label, t.get("mode"), "spike", ts, round(info["pnl"], 2), round(pct, 2), round(ltp, 2), msg, delivered, err],
+    )
+
+
+async def check_spikes(cfg: dict | None = None) -> dict:
+    """Fire a high-priority alert when an open position's stock moves >= spike_pct
+    (up or down) within spike_window_min. Checks BOTH the underlying spot and the
+    traded contract (deduped for equity); fires once per position per window."""
+    from .routers.trades import _TRADE_COLS, _underlying_symbol, _chart_symbols, _quotes_full
+    from .alerts_image import fetch_alert_candles
+
+    cfg = cfg or await get_config()
+    if not cfg.get("spike_enabled", True):
+        return {"skipped": "disabled"}
+    pct_thr = float(cfg.get("spike_pct", 2.0))
+    window = int(cfg.get("spike_window_min", 15))
+
+    db_path = _get_db_path()
+    cols = ", ".join(_TRADE_COLS)
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(f"SELECT {cols} FROM trades WHERE status='open'") as cur:
+            trades = [{k: r[k] for k in _TRADE_COLS} for r in await cur.fetchall()]
+    if not trades:
+        return {"checked": 0, "fired": 0}
+
+    # One quote call for every spot + contract symbol; 5m candles cached per symbol.
+    per_trade = [(t, _underlying_symbol(t), _chart_symbols(t)["contract_symbol"]) for t in trades]
+    syms = {s for _, spot, con in per_trade for s in (spot, con)}
+    quotes = await asyncio.to_thread(_quotes_full, list(syms))
+    candle_cache: dict[str, list] = {}
+
+    def _candles(sym: str) -> list:
+        if sym not in candle_cache:
+            candle_cache[sym] = fetch_alert_candles(sym, "5m")
+        return candle_cache[sym]
+
+    fired = 0
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        for t, spot, contract in per_trade:
+            try:
+                now = datetime.now(timezone.utc)
+                if await _elapsed_min(db, t["id"], "spike", now) < window:
+                    continue  # already alerted this stock within the window
+                candidates = []
+                seen = set()
+                for basis, sym in (("spot", spot), ("contract", contract)):
+                    if not sym or sym in seen:
+                        continue
+                    seen.add(sym)
+                    candles = await asyncio.to_thread(_candles, sym)
+                    ref = _spike_ref_close(candles, window)
+                    q = quotes.get(sym) or {}
+                    ltp = q.get("lp")
+                    if ltp is None and candles:
+                        ltp = candles[-1]["close"]
+                    if ref and ltp:
+                        pct = (float(ltp) - ref) / ref * 100
+                        if abs(pct) >= pct_thr:
+                            candidates.append((basis, sym, pct, float(ltp), candles))
+                if candidates:
+                    trig = max(candidates, key=lambda c: abs(c[2]))  # biggest move
+                    await _fire_spike(db, t, trig, window, now)
+                    fired += 1
+            except Exception:
+                logger.exception("spike check failed for trade %s", t.get("id"))
+        await db.commit()
+    return {"checked": len(trades), "fired": fired}
 
 
 # ---------------------------------------------------------------------------

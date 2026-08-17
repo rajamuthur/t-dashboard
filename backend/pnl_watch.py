@@ -245,13 +245,19 @@ async def check_pnl() -> dict:
         return {"checked": 0, "fired": 0}
 
     fired = 0
+    stale = 0
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         for t in trades:
             try:
+                # Always evaluate on a FRESH price. If the live quote can't be
+                # fetched (token down, illiquid contract), skip this position —
+                # never fire a threshold alert on a stale cached P&L.
                 price = await _refresh_trade(db, t)
-                if price is not None:
-                    t["current_price"] = price
+                if price is None:
+                    stale += 1
+                    continue
+                t["current_price"] = price
                 info = _pnl(t)
                 pnl = info["pnl"]
                 now = datetime.now(timezone.utc)
@@ -266,7 +272,7 @@ async def check_pnl() -> dict:
             except Exception:
                 logger.exception("pnl check failed for trade %s", t.get("id"))
         await db.commit()
-    return {"checked": len(trades), "fired": fired}
+    return {"checked": len(trades), "fired": fired, "stale": stale}
 
 
 async def run_pnl_check() -> dict:
@@ -296,12 +302,15 @@ async def _open_trades_priced() -> list[dict]:
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         for t in trades:
+            fresh = False
             try:
                 price = await _refresh_trade(db, t)
                 if price is not None:
                     t["current_price"] = price
+                    fresh = True
             except Exception:
                 logger.exception("eod price refresh failed for trade %s", t.get("id"))
+            t["_price_fresh"] = fresh  # so the summary can flag stale-priced rows
     for t in trades:
         t.update(_pnl(t))
     return trades
@@ -343,8 +352,9 @@ async def run_eod_summary(force: bool = False) -> dict:
 
     spots = await asyncio.to_thread(_spot_changes, trades)
 
-    # Build the text, grouped by book.
-    lines = [f"\U0001F4CA <b>EOD P&L Summary</b> — {today.strftime('%d %b %Y')}"]
+    # Build the text, grouped by book. Stamp the time so it's clear the P&L is live.
+    now_ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%H:%M")
+    lines = [f"\U0001F4CA <b>EOD P&L Summary</b> — {today.strftime('%d %b %Y')} · as of {now_ist} IST"]
     expiring: list[tuple[dict, int]] = []
     grand = 0.0
     for book in ("actual", "paper"):
@@ -361,6 +371,7 @@ async def run_eod_summary(force: bool = False) -> dict:
             chp = sp.get("chp")
             spot_txt = f" · spot {round(sp['lp'], 2)} ({'▲' if (chp or 0) >= 0 else '▼'}{abs(round(chp or 0, 2))}%)" if sp.get("lp") is not None else ""
             sign = "+" if pnl >= 0 else "−"
+            stale_txt = "" if t.get("_price_fresh", True) else " ⚠ stale price"
             hold = _hold_duration(t.get("entry_at"))
             edate = _entry_date_ist(t.get("entry_at"))
             exp_txt = ""
@@ -372,7 +383,7 @@ async def run_eod_summary(force: bool = False) -> dict:
                     exp_txt = f" · ⚠ expiry in {td}td"
             lines.append(
                 f"• <b>{html.escape(_label(t))}</b> {t.get('side', '').upper()} ×{int(t.get('num_lots') or 1)}\n"
-                f"   P&L {sign}₹{_inr(abs(pnl))} ({round(pct, 2)}%) · entry {round(float(t.get('entry_price') or 0), 2)} → {round(ref, 2)}{spot_txt}\n"
+                f"   P&L {sign}₹{_inr(abs(pnl))} ({round(pct, 2)}%){stale_txt} · entry {round(float(t.get('entry_price') or 0), 2)} → {round(ref, 2)}{spot_txt}\n"
                 f"   held {hold} (since {edate}){exp_txt}"
             )
         lines.append(f"   <i>Subtotal ({book}): {'+' if subtotal >= 0 else '−'}₹{_inr(abs(subtotal))}</i>")

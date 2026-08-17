@@ -53,6 +53,24 @@ async def _alerts_job() -> None:
         logger.exception("alert check failed")
 
 
+async def _pnl_watch_job() -> None:
+    """Evaluate open positions for profit/loss threshold alerts (market-gated inside)."""
+    from ..pnl_watch import run_pnl_check
+    try:
+        await run_pnl_check()
+    except Exception:
+        logger.exception("pnl watch failed")
+
+
+async def _pnl_eod_job() -> None:
+    """Send the EOD P&L summary if today is a trading day (checked inside)."""
+    from ..pnl_watch import run_eod_summary
+    try:
+        await run_eod_summary()
+    except Exception:
+        logger.exception("pnl eod summary failed")
+
+
 async def _eow_job() -> None:
     """Run EOW scan only if today is the last trading day of the week."""
     from ..routers.holidays import get_holiday_set, get_last_trading_day_of_week
@@ -103,8 +121,53 @@ def start_scheduler() -> None:
     # Weekly F&O universe verification (Sunday 08:00 IST).
     _scheduler.add_job(_fo_verify_job, "cron", day_of_week="sun", hour=8, minute=0, id="fo_verify")
 
-    logger.info("Scheduler started. EOW job at %02d:%02d IST", hour, minute)
+    # P&L threshold watcher — interval (base check, default 5 min), market-gated.
+    pnl_cfg = _get_pnl_cfg_sync()
+    _scheduler.add_job(_pnl_watch_job, "interval", minutes=pnl_cfg["base"], id="pnl_watch")
+    # EOD P&L summary — daily at configured time (trading-day checked inside).
+    _scheduler.add_job(_pnl_eod_job, "cron", day_of_week="mon,tue,wed,thu,fri",
+                       hour=pnl_cfg["eod_h"], minute=pnl_cfg["eod_m"], id="pnl_eod")
+
+    logger.info("Scheduler started. EOW job at %02d:%02d IST · P&L EOD at %02d:%02d IST",
+                hour, minute, pnl_cfg["eod_h"], pnl_cfg["eod_m"])
     _scheduler.start()
+
+
+def _get_pnl_cfg_sync() -> dict:
+    """Read pnl_alert_config synchronously at startup: base interval + EOD time."""
+    base, eod = 5, "16:00"
+    try:
+        import sqlite3
+        from ..db import _get_db_path
+        con = sqlite3.connect(_get_db_path())
+        row = con.execute("SELECT value FROM config WHERE key='pnl_alert_config'").fetchone()
+        con.close()
+        if row:
+            cfg = json.loads(row[0])
+            base = max(1, int(cfg.get("base_check_min", 5)))
+            eod = str(cfg.get("eod_time", "16:00"))
+    except Exception:
+        pass
+    h, m = _parse_time(eod)
+    return {"base": base, "eod_h": h, "eod_m": m}
+
+
+def reschedule_pnl(base_min: int) -> None:
+    """Apply a new P&L base-check interval immediately."""
+    if not _scheduler or not _scheduler.running:
+        return
+    _scheduler.reschedule_job("pnl_watch", trigger="interval", minutes=max(1, int(base_min)))
+    logger.info("P&L watcher rescheduled to every %d min", max(1, int(base_min)))
+
+
+def reschedule_pnl_eod(time_str: str) -> None:
+    """Apply a new EOD-summary time immediately."""
+    if not _scheduler or not _scheduler.running:
+        return
+    h, m = _parse_time(time_str)
+    _scheduler.reschedule_job("pnl_eod", trigger="cron",
+                              day_of_week="mon,tue,wed,thu,fri", hour=h, minute=m)
+    logger.info("P&L EOD summary rescheduled to %02d:%02d IST", h, m)
 
 
 def _get_alert_minutes_sync() -> int:

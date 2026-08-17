@@ -162,6 +162,25 @@ CREATE TABLE IF NOT EXISTS alert_notifications (
     error        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_alert_notifs_alert ON alert_notifications(alert_id, id);
+
+-- One row per P&L-alert fire (profit/loss threshold, expiry warning, EOD summary),
+-- with Telegram delivery status. Also the source of "last fired at" so recurring
+-- profit/loss alerts honour their configured re-fire interval (per trade + kind).
+CREATE TABLE IF NOT EXISTS pnl_notifications (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id     INTEGER,                              -- NULL for book-wide (eod) rows
+    symbol       TEXT,                                 -- trade label at fire time
+    mode         TEXT,                                 -- 'actual' | 'paper'
+    kind         TEXT NOT NULL,                        -- 'profit' | 'loss' | 'expiry' | 'eod'
+    triggered_at TEXT NOT NULL,
+    pnl          REAL,                                 -- ₹ P&L at fire
+    pnl_pct      REAL,
+    price        REAL,                                 -- current price at fire
+    message      TEXT,
+    delivered    INTEGER NOT NULL DEFAULT 0,           -- Telegram send succeeded?
+    error        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pnl_notifs_trade ON pnl_notifications(trade_id, kind, id);
 """
 
 async def migrate_schema() -> None:

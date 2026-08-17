@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, X, CheckCircle2, Pencil, ArrowUp, ArrowDown, ArrowUpDown, Send } from "lucide-react";
+import { Plus, RefreshCw, X, CheckCircle2, Pencil, ArrowUp, ArrowDown, ArrowUpDown, Send, Bell } from "lucide-react";
 import NewTradeForm from "@/components/NewTradeForm";
 import EditOpenTradeForm from "@/components/EditOpenTradeForm";
 import CloseTradeForm from "@/components/CloseTradeForm";
@@ -10,6 +10,7 @@ import {
   deleteTrade, setFyersToken, getSpotQuotes,
 } from "@/lib/tradesApi";
 import TradeChartsModal from "@/components/TradeChartsModal";
+import PnlAlertsModal from "@/components/PnlAlertsModal";
 import { sendToTelegram } from "@/lib/telegramApi";
 import { fmtIsoDateTime } from "@/lib/dates";
 
@@ -60,6 +61,7 @@ export default function TradesPage() {
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   const [spotQuotes, setSpotQuotes] = useState<Record<string, SpotQuote>>({});
   const [charting, setCharting] = useState<Trade | null>(null);
+  const [showPnlAlerts, setShowPnlAlerts] = useState(false);
 
   function toggleSelect(id: number) {
     setSelected(prev => {
@@ -263,6 +265,13 @@ export default function TradesPage() {
             className="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 text-xs text-gray-300 hover:text-white disabled:opacity-50"
           >
             <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} /> Refresh prices
+          </button>
+          <button
+            onClick={() => setShowPnlAlerts(true)}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-gray-700 text-xs text-gray-300 hover:text-white"
+            title="P&L alert thresholds, intervals, and the daily summary"
+          >
+            <Bell size={12} /> P&L alerts
           </button>
           <button
             onClick={() => setShowForm(true)}
@@ -522,6 +531,9 @@ export default function TradesPage() {
       )}
       {charting && (
         <TradeChartsModal trade={charting} onClose={() => setCharting(null)} />
+      )}
+      {showPnlAlerts && (
+        <PnlAlertsModal onClose={() => setShowPnlAlerts(false)} />
       )}
     </div>
   );

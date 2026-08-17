@@ -137,6 +137,16 @@ def _inr(n: float) -> str:
     return f"{round(n):,}"
 
 
+def _fmt_expiry(expiry_date: str | None) -> str | None:
+    """'2026-09-24' -> '24 Sep 26'. None if missing/unparseable."""
+    if not expiry_date:
+        return None
+    try:
+        return datetime.strptime(expiry_date[:10], "%Y-%m-%d").strftime("%d %b %y")
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Chart image for a position
 # ---------------------------------------------------------------------------
@@ -505,9 +515,10 @@ async def run_eod_summary(force: bool = False) -> dict:
         return {"positions": 0, "delivered": res.get("ok")}
 
     spots = await asyncio.to_thread(_spot_changes, trades)
-
-    # Build the text, grouped by book. Stamp the time so it's clear the P&L is live.
     now_ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%H:%M")
+
+    # Build the table-image structure AND a text fallback in one pass.
+    sections: list[dict] = []
     lines = [f"\U0001F4CA <b>EOD P&L Summary</b> — {today.strftime('%d %b %Y')} · as of {now_ist} IST"]
     expiring: list[tuple[dict, int]] = []
     grand = 0.0
@@ -516,6 +527,7 @@ async def run_eod_summary(force: bool = False) -> dict:
         if not group:
             continue
         lines.append(f"\n━ {book.upper()} ━")
+        rows: list[dict] = []
         subtotal = 0.0
         for t in group:
             pnl, pct, ref = t["pnl"], t["pnl_pct"], t["ref_price"]
@@ -523,28 +535,50 @@ async def run_eod_summary(force: bool = False) -> dict:
             grand += pnl
             sp = spots.get(t["underlying"], {})
             chp = sp.get("chp")
+            td = trading_days_until(t.get("expiry_date"), holidays)
+            warn = td is not None and td <= cfg["expiry_trading_days"]
+            if warn:
+                expiring.append((t, td))
+            hold = _hold_duration(t.get("entry_at"))
+            edate = _entry_date_ist(t.get("entry_at"))
+            rows.append({
+                "symbol": _label(t), "side": t.get("side"),
+                "qty": int(t.get("lot_size") or 1) * int(t.get("num_lots") or 1),
+                "entry": float(t.get("entry_price") or 0), "ltp": ref,
+                "pnl": pnl, "pnl_pct": pct, "chg": chp,
+                "held": hold, "entered": edate,
+                "expiry": _fmt_expiry(t.get("expiry_date")), "expiry_td": td, "expiry_warn": warn,
+            })
             spot_txt = f" · spot {round(sp['lp'], 2)} ({'▲' if (chp or 0) >= 0 else '▼'}{abs(round(chp or 0, 2))}%)" if sp.get("lp") is not None else ""
             sign = "+" if pnl >= 0 else "−"
             stale_txt = "" if t.get("_price_fresh", True) else " ⚠ stale price"
-            hold = _hold_duration(t.get("entry_at"))
-            edate = _entry_date_ist(t.get("entry_at"))
-            exp_txt = ""
-            td = trading_days_until(t.get("expiry_date"), holidays)
-            if td is not None:
-                exp_txt = f" · expiry in {td}td"
-                if td <= cfg["expiry_trading_days"]:
-                    expiring.append((t, td))
-                    exp_txt = f" · ⚠ expiry in {td}td"
+            exp_txt = (f" · {'⚠ ' if warn else ''}expiry in {td}td") if td is not None else ""
             lines.append(
                 f"• <b>{html.escape(_label(t))}</b> {t.get('side', '').upper()} ×{int(t.get('num_lots') or 1)}\n"
                 f"   P&L {sign}₹{_inr(abs(pnl))} ({round(pct, 2)}%){stale_txt} · entry {round(float(t.get('entry_price') or 0), 2)} → {round(ref, 2)}{spot_txt}\n"
                 f"   held {hold} (since {edate}){exp_txt}"
             )
         lines.append(f"   <i>Subtotal ({book}): {'+' if subtotal >= 0 else '−'}₹{_inr(abs(subtotal))}</i>")
+        sections.append({"book": book.capitalize(), "rows": rows, "subtotal": subtotal})
 
     lines.append(f"\n<b>Net (both books): {'+' if grand >= 0 else '−'}₹{_inr(abs(grand))}</b>")
     summary = "\n".join(lines)
-    res = await send_message(summary)
+
+    # Primary delivery: the clean table image. Fall back to the text if it can't render.
+    net_sign = "+" if grand >= 0 else "−"
+    caption = (f"\U0001F4CA <b>EOD P&L</b> — {today.strftime('%d %b %Y')} · as of {now_ist} IST\n"
+               f"Net {net_sign}₹{_inr(abs(grand))} · {len(trades)} open")
+    table_png = None
+    try:
+        from .pnl_table import render_eod_table_png
+        title = f"EOD P&L Summary  —  {today.strftime('%d %b %Y')}  ·  as of {now_ist} IST"
+        table_png = await asyncio.to_thread(render_eod_table_png, title, sections, grand)
+    except Exception:
+        logger.exception("eod table render failed")
+    if table_png:
+        res = await send_photo(table_png, caption=caption)
+    else:
+        res = await send_message(summary)
     delivered = 1 if res.get("ok") else 0
     await _log_eod(summary, delivered, res.get("error"))
 

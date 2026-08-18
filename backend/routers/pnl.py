@@ -26,6 +26,8 @@ class PnlConfigIn(BaseModel):
     spike_enabled: Optional[bool] = None
     spike_pct: Optional[float] = Field(None, ge=0.1, le=50)
     spike_window_min: Optional[int] = Field(None, ge=1, le=240)
+    market_open_enabled: Optional[bool] = None
+    market_open_time: Optional[str] = Field(None, pattern=r"^([01]?\d|2[0-3]):[0-5]\d$")
 
 
 @router.get("/config")
@@ -36,11 +38,12 @@ async def read_config(_: str = Depends(get_current_user)):
 @router.patch("/config")
 async def update_config(payload: PnlConfigIn, _: str = Depends(get_current_user)):
     cfg = await save_config(payload.model_dump(exclude_none=True))
-    # Apply new cadence / EOD time to the running scheduler immediately.
+    # Apply new cadence / times to the running scheduler immediately.
     try:
-        from ..downloaders.scheduler import reschedule_pnl, reschedule_pnl_eod
+        from ..downloaders.scheduler import reschedule_pnl, reschedule_pnl_eod, reschedule_pnl_market_open
         reschedule_pnl(cfg["base_check_min"])
         reschedule_pnl_eod(cfg["eod_time"])
+        reschedule_pnl_market_open(cfg["market_open_time"])
     except Exception:
         pass
     return cfg
@@ -67,3 +70,10 @@ async def notifications(
 async def run_eod(_: str = Depends(get_current_user)):
     """Send the EOD P&L summary to Telegram right now (bypasses the trading-day gate)."""
     return await run_eod_summary(force=True)
+
+
+@router.post("/run-open")
+async def run_open(_: str = Depends(get_current_user)):
+    """Send the market-open P&L + index brief to Telegram right now."""
+    from ..pnl_watch import run_market_open_summary
+    return await run_market_open_summary(force=True)

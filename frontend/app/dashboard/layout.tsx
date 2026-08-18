@@ -4,6 +4,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { isLoggedIn, clearToken } from "@/lib/auth";
 import FyersTokenBadge from "@/components/FyersTokenBadge";
+import IndexTicker from "@/components/IndexTicker";
 import {
   LayoutDashboard, TrendingUp, Calendar, CandlestickChart, Settings, LogOut,
   ChevronDown, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen,
@@ -133,7 +134,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </button>
       </aside>
 
-      <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="h-11 shrink-0 border-b border-gray-800 bg-gray-900 flex items-center px-6 overflow-x-auto">
+          <IndexTicker />
+        </header>
+        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      </div>
     </div>
   );
 }

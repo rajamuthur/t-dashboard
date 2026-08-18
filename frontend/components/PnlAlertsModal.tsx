@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { X, Bell, Send, RefreshCw, Check, AlertTriangle } from "lucide-react";
 import {
   PnlConfig, PnlNotification,
-  getPnlConfig, setPnlConfig, getPnlNotifications, runEodSummary,
+  getPnlConfig, setPnlConfig, getPnlNotifications, runEodSummary, runOpenBrief,
 } from "@/lib/pnlApi";
 
 const KIND_LABEL: Record<string, string> = { profit: "Profit", loss: "Loss", expiry: "Expiry", eod: "EOD" };
@@ -13,6 +13,7 @@ export default function PnlAlertsModal({ onClose }: { onClose: () => void }) {
   const [notifs, setNotifs] = useState<PnlNotification[]>([]);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendingOpen, setSendingOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -47,6 +48,17 @@ export default function PnlAlertsModal({ onClose }: { onClose: () => void }) {
     } catch (e: any) {
       setMsg((e?.message || "Send failed").replace(/^API \d+:\s*/, ""));
     } finally { setSending(false); }
+  }
+
+  async function sendOpenNow() {
+    setSendingOpen(true); setMsg(null);
+    try {
+      const r = await runOpenBrief();
+      setMsg(r.skipped ? `Skipped: ${r.skipped}` : `Sent open brief — ${r.positions} position(s)`);
+      getPnlNotifications(30).then(setNotifs).catch(() => {});
+    } catch (e: any) {
+      setMsg((e?.message || "Send failed").replace(/^API \d+:\s*/, ""));
+    } finally { setSendingOpen(false); }
   }
 
   return (
@@ -110,6 +122,18 @@ export default function PnlAlertsModal({ onClose }: { onClose: () => void }) {
               <p className="text-[10px] text-gray-500">Fires when a position's underlying spot or its contract moves this much in the window (whichever moves more). Re-alerts at most once per window per stock.</p>
             </div>
 
+            {/* Market-open brief */}
+            <div className="rounded-lg border border-gray-800 p-3 space-y-2">
+              <label className="flex items-center gap-2 text-sky-400 font-medium text-xs uppercase tracking-wider">
+                <input type="checkbox" checked={cfg.market_open_enabled} onChange={e => set("market_open_enabled", e.target.checked)} className="accent-sky-500" />
+                Market-open brief 🔔
+              </label>
+              <Field label="Send at (IST)">
+                <input type="time" value={cfg.market_open_time} onChange={e => set("market_open_time", e.target.value)} className={inp} />
+              </Field>
+              <p className="text-[10px] text-gray-500">At open, sends NIFTY 50 / NIFTY BANK levels + your P&L table. The EOD summary also carries the index values.</p>
+            </div>
+
             {/* Other */}
             <div className="grid grid-cols-3 gap-3">
               <Field label="Check every (min)">
@@ -136,6 +160,11 @@ export default function PnlAlertsModal({ onClose }: { onClose: () => void }) {
                 className="flex items-center gap-1 px-3 py-1.5 rounded border border-gray-700 text-gray-200 hover:text-white text-xs disabled:opacity-50"
                 title="Send the EOD P&L summary to Telegram right now">
                 {sending ? <RefreshCw size={12} className="animate-spin" /> : <Send size={12} />} Send summary now
+              </button>
+              <button onClick={sendOpenNow} disabled={sendingOpen}
+                className="flex items-center gap-1 px-3 py-1.5 rounded border border-gray-700 text-gray-200 hover:text-white text-xs disabled:opacity-50"
+                title="Send the market-open P&L + index brief to Telegram right now">
+                {sendingOpen ? <RefreshCw size={12} className="animate-spin" /> : <Send size={12} />} Send open brief
               </button>
               {msg && <span className="text-xs text-gray-300">{msg}</span>}
             </div>

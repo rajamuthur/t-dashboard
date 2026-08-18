@@ -34,6 +34,8 @@ export interface PnlConfig {
   spike_enabled: boolean;
   spike_pct: number;
   spike_window_min: number;
+  market_open_enabled: boolean;
+  market_open_time: string;   // "HH:MM"
 }
 
 export interface PnlNotification {
@@ -62,4 +64,9 @@ export const getPnlNotifications = (limit = 100) =>
 export const runEodSummary = () =>
   call<{ positions: number; delivered: boolean; charts?: number; expiring?: number; skipped?: string }>(
     "/pnl/run-eod", { method: "POST" },
+  );
+
+export const runOpenBrief = () =>
+  call<{ positions: number; delivered: boolean; skipped?: string }>(
+    "/pnl/run-open", { method: "POST" },
   );

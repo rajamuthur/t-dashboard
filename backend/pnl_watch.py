@@ -39,6 +39,8 @@ DEFAULT_CFG = {
     "spike_enabled": True,          # sudden-move alert on trades-page stocks
     "spike_pct": 2.0,               # |move %| over the window that triggers a spike alert
     "spike_window_min": 15,         # rolling window for the move; also the per-stock re-alert gate
+    "market_open_enabled": True,    # send the morning P&L + index brief at open
+    "market_open_time": "09:15",    # HH:MM IST for the market-open brief
 }
 
 _CFG_KEY = "pnl_alert_config"
@@ -493,11 +495,13 @@ def _spot_changes(trades: list[dict]) -> dict:
     return out
 
 
-async def run_eod_summary(force: bool = False) -> dict:
-    """Send the daily P&L summary (both books) + a chart per open position, and a
-    high-priority expiry warning. `force` bypasses the trading-day gate (manual)."""
+async def _deliver_pnl_summary(*, title_label: str, force: bool, include_charts: bool) -> dict:
+    """Shared P&L brief (market-open + end-of-day): a NIFTY 50 / NIFTY BANK index
+    snapshot, a clean P&L table image (+ optional per-stock charts), and a
+    high-priority expiry warning. Trading-day gated unless `force`."""
     from .routers.holidays import get_holiday_set, is_trading_day
     from .telegram_service import send_message, send_photo
+    from .market_service import index_snapshot, index_summary_line
 
     holidays = await get_holiday_set()
     today = date.today()
@@ -507,19 +511,24 @@ async def run_eod_summary(force: bool = False) -> dict:
     cfg = await get_config()
     trades = await _open_trades_priced()
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now_ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%H:%M")
+    day = today.strftime("%d %b %Y")
+
+    indices = await asyncio.to_thread(index_snapshot)
+    idx_line = index_summary_line(indices)
+    head = f"\U0001F4CA <b>{title_label}</b> — {day} · as of {now_ist} IST"
 
     if not trades:
-        msg = f"\U0001F4CA <b>EOD P&L Summary</b> — {today.strftime('%d %b %Y')}\nNo open positions."
+        msg = f"{head}\n{idx_line}\nNo open positions."
         res = await send_message(msg)
         await _log_eod(msg, 1 if res.get("ok") else 0, res.get("error"))
         return {"positions": 0, "delivered": res.get("ok")}
 
     spots = await asyncio.to_thread(_spot_changes, trades)
-    now_ist = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)).strftime("%H:%M")
 
     # Build the table-image structure AND a text fallback in one pass.
     sections: list[dict] = []
-    lines = [f"\U0001F4CA <b>EOD P&L Summary</b> — {today.strftime('%d %b %Y')} · as of {now_ist} IST"]
+    lines = [head, idx_line]
     expiring: list[tuple[dict, int]] = []
     grand = 0.0
     for book in ("actual", "paper"):
@@ -566,15 +575,14 @@ async def run_eod_summary(force: bool = False) -> dict:
 
     # Primary delivery: the clean table image. Fall back to the text if it can't render.
     net_sign = "+" if grand >= 0 else "−"
-    caption = (f"\U0001F4CA <b>EOD P&L</b> — {today.strftime('%d %b %Y')} · as of {now_ist} IST\n"
-               f"Net {net_sign}₹{_inr(abs(grand))} · {len(trades)} open")
+    caption = f"{head}\n{idx_line}\nNet {net_sign}₹{_inr(abs(grand))} · {len(trades)} open"
     table_png = None
     try:
         from .pnl_table import render_eod_table_png
-        title = f"EOD P&L Summary  —  {today.strftime('%d %b %Y')}  ·  as of {now_ist} IST"
+        title = f"{title_label}  —  {day}  ·  as of {now_ist} IST"
         table_png = await asyncio.to_thread(render_eod_table_png, title, sections, grand)
     except Exception:
-        logger.exception("eod table render failed")
+        logger.exception("summary table render failed")
     if table_png:
         res = await send_photo(table_png, caption=caption)
     else:
@@ -600,19 +608,34 @@ async def run_eod_summary(force: bool = False) -> dict:
                 )
             await db.commit()
 
-    # A chart per open position.
+    # A chart per open position (EOD only — the morning brief stays concise).
     charts = 0
-    for t in trades:
-        try:
-            png = await asyncio.to_thread(render_trade_png, t, {"pnl": t["pnl"], "pnl_pct": t["pnl_pct"], "ref_price": t["ref_price"]})
-            if png:
-                cap = f"{_label(t)} [{(t.get('mode') or 'actual').upper()}]"
-                if (await send_photo(png, caption=cap)).get("ok"):
-                    charts += 1
-        except Exception:
-            logger.exception("eod chart failed for trade %s", t.get("id"))
+    if include_charts:
+        for t in trades:
+            try:
+                png = await asyncio.to_thread(render_trade_png, t, {"pnl": t["pnl"], "pnl_pct": t["pnl_pct"], "ref_price": t["ref_price"]})
+                if png:
+                    cap = f"{_label(t)} [{(t.get('mode') or 'actual').upper()}]"
+                    if (await send_photo(png, caption=cap)).get("ok"):
+                        charts += 1
+            except Exception:
+                logger.exception("summary chart failed for trade %s", t.get("id"))
 
     return {"positions": len(trades), "delivered": bool(delivered), "charts": charts, "expiring": len(expiring)}
+
+
+async def run_eod_summary(force: bool = False) -> dict:
+    """End-of-day P&L brief: index snapshot + P&L table + per-stock charts."""
+    return await _deliver_pnl_summary(title_label="EOD P&L Summary", force=force, include_charts=True)
+
+
+async def run_market_open_summary(force: bool = False) -> dict:
+    """Market-open P&L brief: index snapshot + P&L table (no per-stock charts)."""
+    if not force:
+        cfg = await get_config()
+        if not cfg.get("market_open_enabled", True):
+            return {"skipped": "disabled"}
+    return await _deliver_pnl_summary(title_label="Market Open — P&L", force=force, include_charts=False)
 
 
 async def _log_eod(message: str, delivered: int, error) -> None:

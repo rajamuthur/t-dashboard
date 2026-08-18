@@ -27,6 +27,7 @@ from .routers.ema import router as ema_router
 from .routers.alerts import router as alerts_router
 from .routers.charts import router as charts_router
 from .routers.pnl import router as pnl_router
+from .routers.market import router as market_router
 
 
 def create_app() -> FastAPI:
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     application.include_router(alerts_router)
     application.include_router(charts_router)
     application.include_router(pnl_router)
+    application.include_router(market_router)
     application.include_router(health_router)
     return application
 

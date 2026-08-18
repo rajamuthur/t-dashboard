@@ -71,6 +71,15 @@ async def _pnl_eod_job() -> None:
         logger.exception("pnl eod summary failed")
 
 
+async def _pnl_market_open_job() -> None:
+    """Send the market-open P&L + index brief (trading-day + enabled checked inside)."""
+    from ..pnl_watch import run_market_open_summary
+    try:
+        await run_market_open_summary()
+    except Exception:
+        logger.exception("pnl market-open summary failed")
+
+
 async def _eow_job() -> None:
     """Run EOW scan only if today is the last trading day of the week."""
     from ..routers.holidays import get_holiday_set, get_last_trading_day_of_week
@@ -127,15 +136,18 @@ def start_scheduler() -> None:
     # EOD P&L summary — daily at configured time (trading-day checked inside).
     _scheduler.add_job(_pnl_eod_job, "cron", day_of_week="mon,tue,wed,thu,fri",
                        hour=pnl_cfg["eod_h"], minute=pnl_cfg["eod_m"], id="pnl_eod")
+    # Market-open P&L + index brief (trading-day + enabled checked inside).
+    _scheduler.add_job(_pnl_market_open_job, "cron", day_of_week="mon,tue,wed,thu,fri",
+                       hour=pnl_cfg["open_h"], minute=pnl_cfg["open_m"], id="pnl_market_open")
 
-    logger.info("Scheduler started. EOW job at %02d:%02d IST · P&L EOD at %02d:%02d IST",
-                hour, minute, pnl_cfg["eod_h"], pnl_cfg["eod_m"])
+    logger.info("Scheduler started. EOW job at %02d:%02d IST · P&L EOD at %02d:%02d IST · open at %02d:%02d IST",
+                hour, minute, pnl_cfg["eod_h"], pnl_cfg["eod_m"], pnl_cfg["open_h"], pnl_cfg["open_m"])
     _scheduler.start()
 
 
 def _get_pnl_cfg_sync() -> dict:
-    """Read pnl_alert_config synchronously at startup: base interval + EOD time."""
-    base, eod = 5, "16:00"
+    """Read pnl_alert_config synchronously at startup: base interval + EOD/open times."""
+    base, eod, mopen = 5, "16:00", "09:15"
     try:
         import sqlite3
         from ..db import _get_db_path
@@ -146,10 +158,12 @@ def _get_pnl_cfg_sync() -> dict:
             cfg = json.loads(row[0])
             base = max(1, int(cfg.get("base_check_min", 5)))
             eod = str(cfg.get("eod_time", "16:00"))
+            mopen = str(cfg.get("market_open_time", "09:15"))
     except Exception:
         pass
-    h, m = _parse_time(eod)
-    return {"base": base, "eod_h": h, "eod_m": m}
+    eh, em = _parse_time(eod)
+    oh, om = _parse_time(mopen)
+    return {"base": base, "eod_h": eh, "eod_m": em, "open_h": oh, "open_m": om}
 
 
 def reschedule_pnl(base_min: int) -> None:
@@ -168,6 +182,16 @@ def reschedule_pnl_eod(time_str: str) -> None:
     _scheduler.reschedule_job("pnl_eod", trigger="cron",
                               day_of_week="mon,tue,wed,thu,fri", hour=h, minute=m)
     logger.info("P&L EOD summary rescheduled to %02d:%02d IST", h, m)
+
+
+def reschedule_pnl_market_open(time_str: str) -> None:
+    """Apply a new market-open-brief time immediately."""
+    if not _scheduler or not _scheduler.running:
+        return
+    h, m = _parse_time(time_str)
+    _scheduler.reschedule_job("pnl_market_open", trigger="cron",
+                              day_of_week="mon,tue,wed,thu,fri", hour=h, minute=m)
+    logger.info("P&L market-open brief rescheduled to %02d:%02d IST", h, m)
 
 
 def _get_alert_minutes_sync() -> int:

@@ -95,6 +95,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <span className="text-lg font-semibold text-white">Dashboard</span>
           <FyersTokenBadge />
         </div>
+        {/* Pinned NIFTY 50 / NIFTY BANK ticker */}
+        <div className="px-4 py-2.5 border-b border-gray-800">
+          <IndexTicker compact />
+        </div>
 
         <nav className="flex-1 min-h-0 overflow-y-auto py-3 space-y-1 px-2">
           {/* Overview — pinned */}
@@ -134,12 +138,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </button>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-11 shrink-0 border-b border-gray-800 bg-gray-900 flex items-center px-6 overflow-x-auto">
-          <IndexTicker />
-        </header>
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
-      </div>
+      <main className="flex-1 overflow-y-auto p-6">{children}</main>
     </div>
   );
 }

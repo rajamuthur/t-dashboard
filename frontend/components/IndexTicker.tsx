@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { getIndices, IndexQuote } from "@/lib/marketApi";
+import IndexChartModal from "@/components/IndexChartModal";
 
 function fmt(n: number | null, d = 2): string {
   return n == null ? "—" : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -17,8 +18,9 @@ function inMarketHoursIST(): boolean {
   return mins >= 9 * 60 + 15 && mins <= 16 * 60;
 }
 
-export default function IndexTicker() {
+export default function IndexTicker({ compact = false }: { compact?: boolean }) {
   const [data, setData] = useState<IndexQuote[]>([]);
+  const [charting, setCharting] = useState<{ symbol: string; name: string } | null>(null);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -39,7 +41,40 @@ export default function IndexTicker() {
   }, []);
 
   if (data.length === 0) {
-    return <span className="text-xs text-gray-500">Loading indices…</span>;
+    return <span className="text-[11px] text-gray-500">Loading indices…</span>;
+  }
+
+  const modal = charting && (
+    <IndexChartModal symbol={charting.symbol} name={charting.name} onClose={() => setCharting(null)} />
+  );
+
+  // Compact: vertical stack for the narrow sidebar (name + value, change below).
+  if (compact) {
+    return (
+      <>
+        <div className="space-y-1">
+          {data.map(ix => {
+            const up = (ix.ch ?? 0) >= 0;
+            const color = ix.ch == null ? "text-gray-400" : up ? "text-green-400" : "text-red-400";
+            return (
+              <button key={ix.symbol} onClick={() => setCharting({ symbol: ix.symbol, name: ix.name })}
+                title={`Chart ${ix.name}`}
+                className="w-full text-[11px] leading-tight rounded px-1 py-0.5 hover:bg-gray-800/70 transition">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-gray-400 font-medium">{ix.name}</span>
+                  <span className="font-mono tabular-nums text-white">{fmt(ix.lp)}</span>
+                </div>
+                <div className={`text-right font-mono tabular-nums ${color}`}>
+                  {ix.ch == null ? "—" : `${up ? "▲" : "▼"} ${up ? "+" : ""}${fmt(ix.ch)}`}
+                  {ix.chp != null && ` (${up ? "+" : ""}${fmt(ix.chp)}%)`}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {modal}
+      </>
+    );
   }
 
   return (
@@ -48,16 +83,19 @@ export default function IndexTicker() {
         const up = (ix.ch ?? 0) >= 0;
         const color = ix.ch == null ? "text-gray-400" : up ? "text-green-400" : "text-red-400";
         return (
-          <div key={ix.symbol} className="flex items-center gap-2 whitespace-nowrap">
+          <button key={ix.symbol} onClick={() => setCharting({ symbol: ix.symbol, name: ix.name })}
+            title={`Chart ${ix.name}`}
+            className="flex items-center gap-2 whitespace-nowrap hover:opacity-80">
             <span className="text-gray-400 font-medium">{ix.name}</span>
             <span className="font-mono text-white tabular-nums">{fmt(ix.lp)}</span>
             <span className={`font-mono tabular-nums ${color}`}>
               {ix.ch == null ? "—" : `${up ? "▲" : "▼"} ${up ? "+" : ""}${fmt(ix.ch)}`}
               {ix.chp != null && ` (${up ? "+" : ""}${fmt(ix.chp)}%)`}
             </span>
-          </div>
+          </button>
         );
       })}
+      {modal}
     </div>
   );
 }

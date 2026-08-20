@@ -16,7 +16,7 @@ import { fmtIsoDateTime } from "@/lib/dates";
 
 type SortKey =
   | "symbol" | "instrument_type" | "side" | "qty" | "entry_price"
-  | "ref_price" | "pnl" | "pnl_pct" | "entry_at" | "exit_at";
+  | "ref_price" | "pnl" | "pnl_pct" | "charges" | "net_pnl" | "entry_at" | "exit_at";
 type SortDir = "asc" | "desc";
 
 const REFRESH_INTERVAL_MS = 30_000;
@@ -176,6 +176,8 @@ export default function TradesPage() {
         case "ref_price":       av = a.ref_price;       bv = b.ref_price;       break;
         case "pnl":             av = a.pnl;             bv = b.pnl;             break;
         case "pnl_pct":         av = a.pnl_pct;         bv = b.pnl_pct;         break;
+        case "charges":         av = a.charges;         bv = b.charges;         break;
+        case "net_pnl":         av = a.net_pnl;         bv = b.net_pnl;         break;
         case "entry_at":        av = tsSafe(a.entry_at); bv = tsSafe(b.entry_at); break;
         case "exit_at":         av = tsSafe(a.exit_at);  bv = tsSafe(b.exit_at);  break;
       }
@@ -222,7 +224,7 @@ export default function TradesPage() {
 
   const openTrades = useMemo(() => trades.filter(t => t.status === "open"), [trades]);
   const closedTrades = useMemo(() => trades.filter(t => t.status === "closed"), [trades]);
-  const colCount = book === "paper" ? 14 : 13;
+  const colCount = book === "paper" ? 16 : 15;
 
   return (
     <div className="flex flex-col h-full min-h-0 -m-6">
@@ -317,10 +319,10 @@ export default function TradesPage() {
                 accent={dash.unrealized_pnl >= 0 ? "pos" : "neg"}
               />
               <StatCard
-                label="Total P&L"
-                value={inr(dash.total_pnl)}
-                sub={`${dash.total_count} trades`}
-                accent={dash.total_pnl >= 0 ? "pos" : "neg"}
+                label="Net P&L (after charges)"
+                value={inr(dash.net_total_pnl)}
+                sub={`gross ${inr(dash.total_pnl)} · charges −${inr(dash.total_charges)}`}
+                accent={dash.net_total_pnl >= 0 ? "pos" : "neg"}
               />
               <StatCard
                 label="Win rate"
@@ -395,6 +397,8 @@ export default function TradesPage() {
                 <th className="px-3 py-2 text-right">Stock</th>
                 <SortHeader k="pnl" align="right">P&L</SortHeader>
                 <SortHeader k="pnl_pct" align="right">%</SortHeader>
+                <SortHeader k="charges" align="right">Charges</SortHeader>
+                <SortHeader k="net_pnl" align="right">Net P&L</SortHeader>
                 <SortHeader k="entry_at">Entered</SortHeader>
                 <SortHeader k="exit_at">Exited / Held</SortHeader>
                 {book === "paper" && <th className="px-3 py-2 text-left">Rationale</th>}
@@ -451,6 +455,13 @@ export default function TradesPage() {
                   <td className={`px-3 py-2 text-right font-mono ${pctColor(t.pnl_pct)}`}>
                     {t.pnl_pct != null ? t.pnl_pct.toFixed(2) + "%" : "—"}
                   </td>
+                  <td className="px-3 py-2 text-right font-mono text-amber-300/90"
+                      title={t.status === "closed"
+                        ? `Entry ${inr(t.entry_cost)} + Exit ${inr(t.exit_cost)} (Zerodha est.)`
+                        : `Entry ${inr(t.entry_cost)} (exit charged on close)`}>
+                    −{inr(t.charges)}
+                  </td>
+                  <td className={`px-3 py-2 text-right font-mono font-semibold ${pctColor(t.net_pnl)}`}>{inr(t.net_pnl)}</td>
                   <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{fmtDt(t.entry_at)}</td>
                   <td className="px-3 py-2 text-gray-400 whitespace-nowrap">
                     {t.status === "closed" ? (

@@ -54,6 +54,10 @@ export interface Trade {
   pnl_pct: number;
   ref_price: number;
   qty: number;
+  entry_cost: number;          // estimated Zerodha charges on the entry leg
+  exit_cost: number;           // charges on the exit leg (0 until closed)
+  charges: number;             // entry_cost + exit_cost
+  net_pnl: number;             // pnl − charges
   underlying_symbol: string;   // Fyers spot symbol (NSE:RELIANCE-EQ / index)
   contract_symbol: string;     // Fyers traded-contract symbol (…FUT / option / spot)
 }
@@ -83,6 +87,10 @@ export interface TradeDashboard {
   realized_pnl: number;
   unrealized_pnl: number;
   total_pnl: number;
+  total_charges: number;
+  net_realized_pnl: number;
+  net_unrealized_pnl: number;
+  net_total_pnl: number;
   win_rate: number | null;
   wins: number;
   losses: number;

@@ -16,6 +16,7 @@ from ..trades_catalog import (
     list_expiries, format_option_symbol, format_future_symbol,
 )
 from ..fyers_fo_master import future_symbol as fo_future_symbol, option_symbol as fo_option_symbol
+from ..charges import estimate_charges
 
 router = APIRouter(prefix="/trades", tags=["trades"])
 
@@ -71,6 +72,16 @@ def _underlying_symbol(t: dict) -> str:
         return _INDEX_CHART[und]
     und = und.replace(".NS", "").replace(".BO", "")
     return f"NSE:{und}-EQ"
+
+
+def _augment(d: dict) -> dict:
+    """Attach P&L, estimated Zerodha charges, net P&L, and chart symbols to a row."""
+    d.update(_pnl(d))
+    c = estimate_charges(d)
+    d.update(c)
+    d["net_pnl"] = round(d["pnl"] - c["charges"], 2)
+    d.update(_chart_symbols(d))
+    return d
 
 
 def _chart_symbols(t: dict) -> dict:
@@ -222,7 +233,7 @@ async def list_trades(
     out = []
     for r in rows:
         d = _row_to_dict(r)
-        d.update(_pnl(d)); d.update(_chart_symbols(d))
+        _augment(d)
         out.append(d)
     return out
 
@@ -273,7 +284,7 @@ async def create_trade(
     ) as q:
         row = await q.fetchone()
     d = _row_to_dict(row)
-    d.update(_pnl(d)); d.update(_chart_symbols(d))
+    _augment(d)
     return d
 
 
@@ -331,7 +342,7 @@ async def patch_trade(
     if not row:
         raise HTTPException(404, "Trade not found")
     d = _row_to_dict(row)
-    d.update(_pnl(d)); d.update(_chart_symbols(d))
+    _augment(d)
     return d
 
 
@@ -441,7 +452,7 @@ async def refresh_one(
             "Price unavailable — options need manual update via PATCH {current_price}",
         )
     trade["current_price"] = price
-    trade.update(_pnl(trade)); trade.update(_chart_symbols(trade))
+    _augment(trade)
     return trade
 
 
@@ -528,7 +539,8 @@ async def dashboard(
     async with db.execute(q_sql, p) as q:
         rows = await q.fetchall()
     trades = [_row_to_dict(r) for r in rows]
-    for t in trades: t.update(_pnl(t))
+    for t in trades:
+        t.update(_pnl(t)); t.update(estimate_charges(t))
 
     open_trades = [t for t in trades if t["status"] == "open"]
     closed_trades = [t for t in trades if t["status"] == "closed"]
@@ -547,6 +559,10 @@ async def dashboard(
 
     realized = sum(t["pnl"] for t in closed_trades)
     unrealized = sum(t["pnl"] for t in open_trades)
+    # Charges: closed trades carry entry+exit; open trades carry entry only.
+    realized_charges = sum(t["charges"] for t in closed_trades)
+    unrealized_charges = sum(t["charges"] for t in open_trades)
+    total_charges = realized_charges + unrealized_charges
     return {
         "open_count": len(open_trades),
         "closed_count": len(closed_trades),
@@ -554,6 +570,10 @@ async def dashboard(
         "realized_pnl": round(realized, 2),
         "unrealized_pnl": round(unrealized, 2),
         "total_pnl": round(realized + unrealized, 2),
+        "total_charges": round(total_charges, 2),
+        "net_realized_pnl": round(realized - realized_charges, 2),
+        "net_unrealized_pnl": round(unrealized - unrealized_charges, 2),
+        "net_total_pnl": round(realized + unrealized - total_charges, 2),
         "win_rate": round(len(wins) / len(closed_trades) * 100, 2) if closed_trades else None,
         "wins": len(wins),
         "losses": len(closed_trades) - len(wins),

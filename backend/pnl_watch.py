@@ -170,13 +170,11 @@ def render_trade_png(trade: dict, info: dict) -> bytes | None:
         return None
     candles = candles[-130:]
 
-    pnl, pct, ref = info["pnl"], info["pnl_pct"], info["ref_price"]
-    color = "#16a34a" if pnl >= 0 else "#dc2626"
+    pnl, pct = info["pnl"], info["pnl_pct"]
     shapes: list[dict] = []
     entry = float(trade.get("entry_price") or 0)
     if on_contract and entry:  # entry aligns with the charted instrument
         shapes.append({"type": "hline", "price": entry, "color": "#2563eb"})
-    shapes.append({"type": "marker", "date": candles[-1]["date"], "price": float(ref), "color": color})
 
     sign = "+" if pnl >= 0 else "-"
     book = (trade.get("mode") or "actual").upper()
@@ -330,13 +328,12 @@ def _spike_ref_close(candles: list[dict], window_min: int) -> float | None:
 
 
 def render_spike_png(label: str, candles: list[dict], ltp: float, pct: float, window_min: int) -> bytes | None:
-    """Intraday 5m chart of the moving stock with a marker at the current price."""
+    """Intraday 5m chart of the moving stock (the move % is in the title)."""
     from .chart_render import render_pattern_png
     if not candles:
         return None
     c = candles[-80:]
-    color = "#16a34a" if pct >= 0 else "#dc2626"
-    shapes = [{"type": "marker", "date": c[-1]["date"], "price": float(ltp), "color": color}]
+    shapes: list[dict] = []
     arrow = "▲" if pct >= 0 else "▼"
     title = f"{label}  {arrow}{abs(round(pct, 2))}% in {window_min}m  (LTP {round(ltp, 2)})"
     try:

@@ -78,9 +78,6 @@ def render_alert_png(alert: dict, ltp: float, level: float, direction: str) -> O
         # Horizontal alert (or a trend alert missing anchors) -> a flat line at the level.
         shapes.append({"type": "hline", "price": float(level), "color": color})
 
-    # Dot on the last candle where price crossed.
-    shapes.append({"type": "marker", "date": last_date, "price": float(ltp), "color": color})
-
     verb = "crossed above" if direction == "up" else "crossed below"
     title = f"{_short(alert['symbol'])}  {verb} {round(level, 2)} · LTP {round(ltp, 2)}  ({timeframe})"
     try:

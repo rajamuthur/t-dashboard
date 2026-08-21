@@ -75,6 +75,18 @@ def render_pattern_png(symbol: str, candles: List[dict], shapes: List[dict],
                               figratio=(16, 9), figscale=1.1, title=title or symbol,
                               returnfig=True, tight_layout=True)
 
+    # Add empty space to the right so the last (current) candle + its marker don't
+    # sit flush against the chart edge / price axis. mplfinance plots by integer
+    # bar position, so extend the shared x-limit by a few bar-widths.
+    try:
+        axlist = _axes if isinstance(_axes, (list, tuple)) else [_axes]
+        lo, hi = axlist[0].get_xlim()
+        pad = max(4.0, len(df) * 0.08)
+        for ax in axlist:
+            ax.set_xlim(lo, hi + pad)
+    except Exception:
+        pass
+
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
     plt.close(fig)

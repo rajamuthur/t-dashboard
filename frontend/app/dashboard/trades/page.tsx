@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, X, CheckCircle2, Pencil, ArrowUp, ArrowDown, ArrowUpDown, Send, Bell } from "lucide-react";
+import { Plus, RefreshCw, X, CheckCircle2, Pencil, ArrowUp, ArrowDown, ArrowUpDown, Send, Bell, Eye, EyeOff } from "lucide-react";
 import NewTradeForm from "@/components/NewTradeForm";
 import EditOpenTradeForm from "@/components/EditOpenTradeForm";
 import CloseTradeForm from "@/components/CloseTradeForm";
@@ -11,6 +11,7 @@ import {
 } from "@/lib/tradesApi";
 import TradeChartsModal from "@/components/TradeChartsModal";
 import PnlAlertsModal from "@/components/PnlAlertsModal";
+import TradeStrip from "@/components/TradeStrip";
 import { sendToTelegram } from "@/lib/telegramApi";
 import { fmtIsoDateTime } from "@/lib/dates";
 
@@ -30,13 +31,13 @@ function pctColor(p: number | null | undefined) {
   return p > 0 ? "text-green-400" : "text-red-400";
 }
 
-function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: "pos" | "neg" | "neutral" }) {
+function StatCard({ label, value, sub, accent, masked }: { label: string; value: string; sub?: string; accent?: "pos" | "neg" | "neutral"; masked?: boolean }) {
   const tint = accent === "pos" ? "text-green-400" : accent === "neg" ? "text-red-400" : "text-white";
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900 px-4 py-3">
       <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className={`text-xl font-semibold font-mono tabular-nums mt-1 ${tint}`}>{value}</div>
-      {sub && <div className="text-[11px] text-gray-500 mt-0.5">{sub}</div>}
+      <div className={`text-xl font-semibold font-mono tabular-nums mt-1 ${masked ? "text-gray-600 select-none" : tint}`}>{masked ? "••••••" : value}</div>
+      {sub && <div className="text-[11px] text-gray-500 mt-0.5">{masked ? "•••" : sub}</div>}
     </div>
   );
 }
@@ -62,6 +63,7 @@ export default function TradesPage() {
   const [spotQuotes, setSpotQuotes] = useState<Record<string, SpotQuote>>({});
   const [charting, setCharting] = useState<Trade | null>(null);
   const [showPnlAlerts, setShowPnlAlerts] = useState(false);
+  const [revealKpi, setRevealKpi] = useState(false);   // KPI values hidden by default each load
 
   function toggleSelect(id: number) {
     setSelected(prev => {
@@ -304,30 +306,45 @@ export default function TradesPage() {
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Dashboard */}
         {dash && (
-          <>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-wider text-gray-500">Summary</span>
+              <button
+                onClick={() => setRevealKpi(v => !v)}
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-white"
+                title={revealKpi ? "Hide values" : "Show values"}
+              >
+                {revealKpi ? <EyeOff size={14} /> : <Eye size={14} />}
+                {revealKpi ? "Hide" : "Show"}
+              </button>
+            </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <StatCard
                 label="Realized P&L"
                 value={inr(dash.realized_pnl)}
                 sub={`${dash.closed_count} closed`}
                 accent={dash.realized_pnl >= 0 ? "pos" : "neg"}
+                masked={!revealKpi}
               />
               <StatCard
                 label="Unrealized P&L"
                 value={inr(dash.unrealized_pnl)}
                 sub={`${dash.open_count} open`}
                 accent={dash.unrealized_pnl >= 0 ? "pos" : "neg"}
+                masked={!revealKpi}
               />
               <StatCard
                 label="Net P&L (after charges)"
                 value={inr(dash.net_total_pnl)}
                 sub={`gross ${inr(dash.total_pnl)} · charges −${inr(dash.total_charges)}`}
                 accent={dash.net_total_pnl >= 0 ? "pos" : "neg"}
+                masked={!revealKpi}
               />
               <StatCard
                 label="Win rate"
                 value={dash.win_rate != null ? `${dash.win_rate}%` : "—"}
                 sub={dash.closed_count > 0 ? `${dash.wins}W / ${dash.losses}L` : "no closed trades"}
+                masked={!revealKpi}
               />
             </div>
             <div className="flex flex-wrap gap-3 text-xs">
@@ -335,14 +352,17 @@ export default function TradesPage() {
                 <div key={k} className="px-3 py-1.5 rounded border border-gray-800 bg-gray-900">
                   <span className="capitalize text-gray-400">{k}</span>
                   <span className="ml-2 text-gray-300">{v.open}o / {v.closed}c</span>
-                  <span className={`ml-2 font-mono tabular-nums ${pctColor(v.realized_pnl + v.unrealized_pnl)}`}>
-                    {inr(v.realized_pnl + v.unrealized_pnl)}
+                  <span className={`ml-2 font-mono tabular-nums ${revealKpi ? pctColor(v.realized_pnl + v.unrealized_pnl) : "text-gray-600 select-none"}`}>
+                    {revealKpi ? inr(v.realized_pnl + v.unrealized_pnl) : "••••"}
                   </span>
                 </div>
               ))}
             </div>
-          </>
+          </div>
         )}
+
+        {/* All-trades visual strip (newest first) */}
+        <TradeStrip trades={trades} book={book} spotQuotes={spotQuotes} />
 
         {/* Filter tabs */}
         <div className="flex items-center gap-1 text-xs">

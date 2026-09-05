@@ -28,6 +28,9 @@ class CfgIn(BaseModel):
     universe: Optional[str] = None
     timeframe: Optional[str] = None
     direction: Optional[str] = Field(None, pattern="^(both|bull|bear)$")
+    watch_enabled: Optional[bool] = None
+    watch_eod_time: Optional[str] = Field(None, pattern=r"^([01]?\d|2[0-3]):[0-5]\d$")
+    watch_open_time: Optional[str] = Field(None, pattern=r"^([01]?\d|2[0-3]):[0-5]\d$")
 
 
 @router.get("/config")
@@ -42,7 +45,13 @@ async def update_config(payload: CfgIn, _: str = Depends(get_current_user)):
         # sanitise: positive, unique, sorted, ≤ 8 entries
         vals = sorted({round(float(x), 2) for x in patch["rr_targets"] if float(x) > 0})
         patch["rr_targets"] = vals[:8] or [3, 5, 7, 10]
-    return await save_config(patch)
+    cfg = await save_config(patch)
+    try:
+        from ..downloaders.scheduler import reschedule_gap_watch
+        reschedule_gap_watch(cfg["watch_eod_time"], cfg["watch_open_time"])
+    except Exception:
+        pass
+    return cfg
 
 
 @router.get("/universes")
@@ -86,3 +95,35 @@ async def backtest_status(_: str = Depends(get_current_user)):
 @router.get("/chart")
 async def chart(symbol: str = Query(...), _: str = Depends(get_current_user)):
     return await chart_data(symbol.strip().upper())
+
+
+# --- "Entry for tomorrow" watch ---
+@router.get("/watch")
+async def watch(_: str = Depends(get_current_user)):
+    from ..gap_reversal_watch import watch_with_quotes
+    return await watch_with_quotes()
+
+
+@router.get("/watch/status")
+async def watch_status(_: str = Depends(get_current_user)):
+    from ..gap_reversal_watch import get_watch_status
+    return get_watch_status()
+
+
+@router.post("/watch/update")
+async def watch_update(_: str = Depends(get_current_user)):
+    from ..gap_reversal_watch import update_watch, watch_with_quotes
+    await update_watch()
+    return await watch_with_quotes()
+
+
+@router.post("/watch/send-eod")
+async def watch_send_eod(_: str = Depends(get_current_user)):
+    from ..gap_reversal_watch import send_watch_eod
+    return await send_watch_eod(force=True)
+
+
+@router.post("/watch/check-gaps")
+async def watch_check_gaps(_: str = Depends(get_current_user)):
+    from ..gap_reversal_watch import check_morning_gaps
+    return await check_morning_gaps(force=True)

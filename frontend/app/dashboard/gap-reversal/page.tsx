@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Play, RefreshCw, ChevronDown, ChevronRight, TrendingUp, TrendingDown, Save } from "lucide-react";
+import { Play, RefreshCw, ChevronDown, ChevronRight, TrendingUp, TrendingDown, Save, Send } from "lucide-react";
 import GapReversalChart from "@/components/GapReversalChart";
 import {
-  GrConfig, Universe, GrScanResult, GrBacktest, GrChart,
+  GrConfig, Universe, GrScanResult, GrBacktest, GrChart, GrWatch,
   getGrConfig, setGrConfig, getGrUniverses, runGrScan, getGrScanResult,
   runGrBacktest, getGrBacktestResult, getGrChart,
+  getGrWatch, updateGrWatch, sendGrWatchEod, checkGrGaps,
 } from "@/lib/gapReversalApi";
 
 const num = (v: string, min = 0) => Math.max(min, Number(v) || 0);
@@ -20,7 +21,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function GapReversalPage() {
   const [cfg, setCfg] = useState<GrConfig | null>(null);
   const [universes, setUniverses] = useState<Universe[]>([]);
-  const [tab, setTab] = useState<"scanner" | "backtest">("backtest");
+  const [tab, setTab] = useState<"watch" | "backtest" | "scanner">("watch");
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -34,12 +35,25 @@ export default function GapReversalPage() {
   const [chartCache, setChartCache] = useState<Record<string, GrChart>>({});
   const [loadingChart, setLoadingChart] = useState<string | null>(null);
 
+  const [watch, setWatch] = useState<GrWatch | null>(null);
+  const [watchUpdating, setWatchUpdating] = useState(false);
+  const [watchSending, setWatchSending] = useState(false);
+
   useEffect(() => {
     getGrConfig().then(setCfg).catch(() => setMsg("Failed to load settings"));
     getGrUniverses().then(setUniverses).catch(() => {});
     getGrScanResult().then(r => { if (r?.rows?.length) setScan(r); }).catch(() => {});
     getGrBacktestResult().then(r => { if (r?.total_signals) setBt(r); }).catch(() => {});
+    getGrWatch().then(w => { if (w?.rows) setWatch(w); }).catch(() => {});
   }, []);
+
+  // Auto-refresh the watchlist quotes every 30s while the tab is open.
+  useEffect(() => {
+    if (tab !== "watch") return;
+    const load = () => getGrWatch().then(w => { if (w?.rows) setWatch(w); }).catch(() => {});
+    const id = window.setInterval(load, 30_000);
+    return () => window.clearInterval(id);
+  }, [tab]);
 
   function set<K extends keyof GrConfig>(k: K, v: GrConfig[K]) { setCfg(c => c ? { ...c, [k]: v } : c); }
 
@@ -62,6 +76,19 @@ export default function GapReversalPage() {
     setBtRunning(true); setMsg(null);
     try { setBt(await runGrBacktest()); } catch (e: any) { setMsg((e?.message || "Backtest failed").replace(/^API \d+:\s*/, "")); }
     finally { setBtRunning(false); }
+  }
+
+  async function doWatchUpdate() {
+    setWatchUpdating(true); setMsg(null);
+    try { setWatch(await updateGrWatch()); setMsg("Watchlist refreshed"); setTimeout(() => setMsg(null), 2000); }
+    catch (e: any) { setMsg((e?.message || "Update failed").replace(/^API \d+:\s*/, "")); }
+    finally { setWatchUpdating(false); }
+  }
+  async function doWatchSend() {
+    setWatchSending(true); setMsg(null);
+    try { const r = await sendGrWatchEod(); setMsg(r.skipped ? `Skipped: ${r.skipped}` : `Sent ${r.count} stock(s) to Telegram`); getGrWatch().then(w => { if (w?.rows) setWatch(w); }).catch(() => {}); }
+    catch (e: any) { setMsg((e?.message || "Send failed").replace(/^API \d+:\s*/, "")); }
+    finally { setWatchSending(false); }
   }
 
   async function toggleChart(sym: string) {
@@ -113,6 +140,13 @@ export default function GapReversalPage() {
             <input value={cfg.rr_targets.join(",")} onChange={e => set("rr_targets", e.target.value.split(",").map(x => Number(x.trim())).filter(x => x > 0))} className={inp} />
           </Field>
           <Field label="Max hold (bars)"><input type="number" value={cfg.max_hold_bars} onChange={e => set("max_hold_bars", num(e.target.value, 1))} className={inp} /></Field>
+          <Field label="Watch enabled">
+            <label className="flex items-center gap-2 text-xs text-gray-200 h-[30px]">
+              <input type="checkbox" checked={cfg.watch_enabled} onChange={e => set("watch_enabled", e.target.checked)} className="accent-brand-500" /> on
+            </label>
+          </Field>
+          <Field label="Watch EOD send (IST)"><input type="time" value={cfg.watch_eod_time} onChange={e => set("watch_eod_time", e.target.value)} className={inp} /></Field>
+          <Field label="Morning gap check (IST)"><input type="time" value={cfg.watch_open_time} onChange={e => set("watch_open_time", e.target.value)} className={inp} /></Field>
           <div className="flex items-end">
             <button onClick={save} disabled={saving} className="flex items-center gap-1 px-3 py-1.5 rounded bg-gray-800 border border-gray-700 text-gray-200 hover:text-white text-xs disabled:opacity-50">
               {saving ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />} Save
@@ -123,10 +157,69 @@ export default function GapReversalPage() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 text-xs">
-        {(["backtest", "scanner"] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded capitalize border ${tab === t ? "bg-brand-600 border-brand-500 text-white" : "bg-gray-800 border-gray-700 text-gray-300 hover:text-white"}`}>{t}</button>
+        {([["watch", "Entry for tomorrow"], ["backtest", "Backtest"], ["scanner", "Scanner"]] as const).map(([t, label]) => (
+          <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded border ${tab === t ? "bg-brand-600 border-brand-500 text-white" : "bg-gray-800 border-gray-700 text-gray-300 hover:text-white"}`}>{label}</button>
         ))}
       </div>
+
+      {tab === "watch" && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <button onClick={doWatchUpdate} disabled={watchUpdating} className="flex items-center gap-1 px-3 py-1.5 rounded bg-brand-600 hover:bg-brand-500 text-white text-xs disabled:opacity-50">
+              {watchUpdating ? <RefreshCw size={13} className="animate-spin" /> : <RefreshCw size={13} />} {watchUpdating ? "Refreshing (fetching F&O)…" : "Update now"}
+            </button>
+            <button onClick={doWatchSend} disabled={watchSending} className="flex items-center gap-1 px-3 py-1.5 rounded border border-gray-700 text-gray-200 hover:text-white text-xs disabled:opacity-50" title="Send the current watchlist to Telegram now">
+              {watchSending ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} />} Send to Telegram
+            </button>
+            {watch && <span className="text-xs text-gray-400">{watch.rows.length} stock(s) · {watch.rows.filter(r => r.direction === "oversold").length} long / {watch.rows.filter(r => r.direction === "overbought").length} short</span>}
+          </div>
+          <p className="text-[11px] text-gray-500">
+            F&amp;O stocks with RSI-on-EMA ≥ {cfg.band_upper} (short setup) or ≤ {cfg.band_lower} (long setup), kept until RSI crosses back inside. Live price auto-refreshes every 30s. The list is sent to Telegram at {cfg.watch_eod_time}; next-morning gap-entry alerts run at {cfg.watch_open_time} (fallback 09:15).
+          </p>
+          {watch && (
+            <div className="overflow-x-auto rounded-lg border border-gray-800">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-900 text-gray-400"><tr>
+                  <th className="px-2 py-2 w-6"></th><th className="px-3 py-2 text-left">Symbol</th><th className="px-3 py-2 text-left">Setup</th>
+                  <th className="px-3 py-2 text-right">RSI</th><th className="px-3 py-2 text-left">Since</th>
+                  <th className="px-3 py-2 text-right">Prev close</th><th className="px-3 py-2 text-right">Current</th>
+                  <th className="px-3 py-2 text-right">Day %</th><th className="px-3 py-2 text-right">Gap now</th>
+                </tr></thead>
+                <tbody className="divide-y divide-gray-800/60 bg-gray-950">
+                  {watch.rows.length === 0 && <tr><td colSpan={9} className="text-center py-5 text-gray-500">No F&amp;O stocks in the extreme zone. Hit “Update now”.</td></tr>}
+                  {watch.rows.map(r => {
+                    const gapNow = r.lp != null && r.last_close ? (r.lp - r.last_close) / r.last_close * 100 : null;
+                    const alignedGap = gapNow != null && ((r.direction === "oversold" && gapNow >= cfg.gap_pct) || (r.direction === "overbought" && gapNow <= -cfg.gap_pct));
+                    return (
+                      <>
+                        <tr key={r.symbol} onClick={() => toggleChart(r.symbol)} className="hover:bg-gray-900/50 cursor-pointer">
+                          <td className="px-2 py-2 text-gray-500">{loadingChart === r.symbol ? <RefreshCw size={11} className="animate-spin" /> : expanded === r.symbol ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
+                          <td className="px-3 py-2 font-mono text-brand-300">{r.name}</td>
+                          <td className="px-3 py-2">{r.direction === "oversold" ? <span className="text-green-400 flex items-center gap-1"><TrendingUp size={12} />Long · gap-up</span> : <span className="text-red-400 flex items-center gap-1"><TrendingDown size={12} />Short · gap-down</span>}</td>
+                          <td className="px-3 py-2 text-right font-mono text-gray-200">{r.rsi_ema}</td>
+                          <td className="px-3 py-2 text-gray-400">{r.entered_date}</td>
+                          <td className="px-3 py-2 text-right font-mono text-gray-300">{inr(r.last_close)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-gray-200">{r.lp != null ? inr(r.lp) : "—"}</td>
+                          <td className={`px-3 py-2 text-right font-mono ${rColor(r.chp ?? 0)}`}>{r.chp != null ? `${r.chp > 0 ? "+" : ""}${r.chp}%` : "—"}</td>
+                          <td className={`px-3 py-2 text-right font-mono ${alignedGap ? "text-amber-300 font-semibold" : "text-gray-500"}`}>{gapNow != null ? `${gapNow > 0 ? "+" : ""}${gapNow.toFixed(2)}%${alignedGap ? " ⚡" : ""}` : "—"}</td>
+                        </tr>
+                        {expanded === r.symbol && (
+                          <tr><td colSpan={9} className="px-3 py-3 bg-gray-950">
+                            {chartCache[r.symbol]
+                              ? <GapReversalChart candles={chartCache[r.symbol].candles} shapes={chartCache[r.symbol].shapes} rsi={chartCache[r.symbol].rsi} bands={chartCache[r.symbol].bands} height={440} />
+                              : <div className="text-gray-500 text-xs">Loading chart…</div>}
+                          </td></tr>
+                        )}
+                      </>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!watch && <div className="text-gray-500 text-sm">Loading watchlist…</div>}
+        </div>
+      )}
 
       {tab === "backtest" && (
         <div className="space-y-3">

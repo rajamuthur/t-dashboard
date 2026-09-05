@@ -28,6 +28,7 @@ export interface GrConfig {
   band_upper: number; band_middle: number; band_lower: number;
   gap_pct: number; rr_targets: number[]; max_hold_bars: number;
   universe: string; timeframe: string; direction: "both" | "bull" | "bear";
+  watch_enabled: boolean; watch_eod_time: string; watch_open_time: string;
 }
 export interface Universe { key: string; label: string; count: number; }
 
@@ -67,3 +68,18 @@ export const getGrBacktestResult = () => call<GrBacktest>("/gap-reversal/backtes
 
 export const getGrChart = (symbol: string) =>
   call<GrChart>(`/gap-reversal/chart?symbol=${encodeURIComponent(symbol)}`);
+
+export interface GrWatchRow {
+  symbol: string; name: string; direction: "oversold" | "overbought"; rsi_ema: number;
+  ema: number; last_close: number; last_low: number; last_high: number;
+  entered_date: string; last_updated: string; alerted_date: string | null;
+  lp: number | null; chp: number | null;
+}
+export interface GrWatch { rows: GrWatchRow[]; at: string; }
+
+export const getGrWatch = () => call<GrWatch>("/gap-reversal/watch");
+export const updateGrWatch = () => call<GrWatch>("/gap-reversal/watch/update", { method: "POST" });
+export const sendGrWatchEod = () =>
+  call<{ count: number; delivered: boolean; error?: string; skipped?: string }>("/gap-reversal/watch/send-eod", { method: "POST" });
+export const checkGrGaps = () =>
+  call<{ checked: number; fired: number; skipped?: string }>("/gap-reversal/watch/check-gaps", { method: "POST" });

@@ -181,6 +181,22 @@ CREATE TABLE IF NOT EXISTS pnl_notifications (
     error        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_pnl_notifs_trade ON pnl_notifications(trade_id, kind, id);
+
+-- Gap-Reversal "Entry for tomorrow" watchlist: F&O stocks whose RSI-on-EMA (day)
+-- is in the extreme zone (>= upper band / <= lower band). A stock stays until its
+-- RSI crosses back inside. Refreshed daily; last_close feeds the next-morning gap.
+CREATE TABLE IF NOT EXISTS gap_watch (
+    symbol        TEXT PRIMARY KEY,                    -- NSE:XXX-EQ
+    direction     TEXT NOT NULL,                       -- 'oversold' (<=lower → long) | 'overbought' (>=upper → short)
+    rsi_ema       REAL,
+    ema           REAL,
+    last_close    REAL,                                -- latest daily close (gap reference for the morning)
+    last_low      REAL,                                -- latest daily low  (stop for a long entry)
+    last_high     REAL,                                -- latest daily high (stop for a short entry)
+    entered_date  TEXT,                                -- first day it entered the extreme zone
+    last_updated  TEXT,
+    alerted_date  TEXT                                 -- last morning we fired a gap-entry alert (dedupe)
+);
 """
 
 async def migrate_schema() -> None:

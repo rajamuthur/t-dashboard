@@ -42,6 +42,9 @@ DEFAULT_CFG = {
     "universe": "fo",
     "timeframe": "day",
     "direction": "both",       # both | bull | bear
+    "watch_enabled": True,     # "Entry for tomorrow" daily watch + alerts
+    "watch_eod_time": "16:00", # send the watchlist to Telegram (IST)
+    "watch_open_time": "09:08",# morning gap check (falls back to 09:15)
 }
 _CFG_KEY = "gap_reversal_config"
 

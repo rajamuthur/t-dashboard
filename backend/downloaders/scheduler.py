@@ -80,6 +80,24 @@ async def _pnl_market_open_job() -> None:
         logger.exception("pnl market-open summary failed")
 
 
+async def _gap_watch_eod_job() -> None:
+    """Refresh the Gap-Reversal watchlist and send it to Telegram (EOD)."""
+    from ..gap_reversal_watch import send_watch_eod
+    try:
+        await send_watch_eod()
+    except Exception:
+        logger.exception("gap-watch EOD failed")
+
+
+async def _gap_watch_open_job() -> None:
+    """Morning gap-entry check for watched stocks (09:08, fallback 09:15)."""
+    from ..gap_reversal_watch import check_morning_gaps
+    try:
+        await check_morning_gaps()
+    except Exception:
+        logger.exception("gap-watch morning check failed")
+
+
 async def _eow_job() -> None:
     """Run EOW scan only if today is the last trading day of the week."""
     from ..routers.holidays import get_holiday_set, get_last_trading_day_of_week
@@ -140,9 +158,50 @@ def start_scheduler() -> None:
     _scheduler.add_job(_pnl_market_open_job, "cron", day_of_week="mon,tue,wed,thu,fri",
                        hour=pnl_cfg["open_h"], minute=pnl_cfg["open_m"], id="pnl_market_open")
 
-    logger.info("Scheduler started. EOW job at %02d:%02d IST · P&L EOD at %02d:%02d IST · open at %02d:%02d IST",
-                hour, minute, pnl_cfg["eod_h"], pnl_cfg["eod_m"], pnl_cfg["open_h"], pnl_cfg["open_m"])
+    # Gap-Reversal "Entry for tomorrow" watch — EOD list + morning gap check (+9:15 fallback).
+    gw = _get_gap_watch_cfg_sync()
+    _scheduler.add_job(_gap_watch_eod_job, "cron", day_of_week="mon,tue,wed,thu,fri",
+                       hour=gw["eod_h"], minute=gw["eod_m"], id="gap_watch_eod")
+    _scheduler.add_job(_gap_watch_open_job, "cron", day_of_week="mon,tue,wed,thu,fri",
+                       hour=gw["open_h"], minute=gw["open_m"], id="gap_watch_open")
+    _scheduler.add_job(_gap_watch_open_job, "cron", day_of_week="mon,tue,wed,thu,fri",
+                       hour=9, minute=15, id="gap_watch_open_fb")
+
+    logger.info("Scheduler started. EOW %02d:%02d · P&L EOD %02d:%02d · P&L open %02d:%02d · gap-watch EOD %02d:%02d open %02d:%02d IST",
+                hour, minute, pnl_cfg["eod_h"], pnl_cfg["eod_m"], pnl_cfg["open_h"], pnl_cfg["open_m"],
+                gw["eod_h"], gw["eod_m"], gw["open_h"], gw["open_m"])
     _scheduler.start()
+
+
+def _get_gap_watch_cfg_sync() -> dict:
+    """Read gap_reversal_config synchronously at startup: watch EOD + open times."""
+    eod, mopen = "16:00", "09:08"
+    try:
+        import sqlite3
+        from ..db import _get_db_path
+        con = sqlite3.connect(_get_db_path())
+        row = con.execute("SELECT value FROM config WHERE key='gap_reversal_config'").fetchone()
+        con.close()
+        if row:
+            cfg = json.loads(row[0])
+            eod = str(cfg.get("watch_eod_time", "16:00"))
+            mopen = str(cfg.get("watch_open_time", "09:08"))
+    except Exception:
+        pass
+    eh, em = _parse_time(eod)
+    oh, om = _parse_time(mopen)
+    return {"eod_h": eh, "eod_m": em, "open_h": oh, "open_m": om}
+
+
+def reschedule_gap_watch(eod_time: str, open_time: str) -> None:
+    """Apply new Gap-Reversal watch times immediately."""
+    if not _scheduler or not _scheduler.running:
+        return
+    eh, em = _parse_time(eod_time)
+    oh, om = _parse_time(open_time)
+    _scheduler.reschedule_job("gap_watch_eod", trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=eh, minute=em)
+    _scheduler.reschedule_job("gap_watch_open", trigger="cron", day_of_week="mon,tue,wed,thu,fri", hour=oh, minute=om)
+    logger.info("Gap-watch rescheduled: EOD %02d:%02d · open %02d:%02d IST", eh, em, oh, om)
 
 
 def _get_pnl_cfg_sync() -> dict:

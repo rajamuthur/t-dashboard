@@ -48,7 +48,11 @@ export interface GrBacktest {
   params: GrConfig;
 }
 
-export interface GrChart { candles: any[]; shapes: any[]; focus_date: string | null; }
+export interface GrChart {
+  candles: any[]; shapes: any[]; focus_date: string | null;
+  rsi: { date: string; rsi: number | null; rsi_ma: number | null }[];
+  bands?: { upper: number; middle: number; lower: number };
+}
 
 export const getGrConfig = () => call<GrConfig>("/gap-reversal/config");
 export const setGrConfig = (patch: Partial<GrConfig>) =>

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { Play, RefreshCw, ChevronDown, ChevronRight, TrendingUp, TrendingDown, Save } from "lucide-react";
-import PatternShapeChart from "@/components/PatternShapeChart";
+import GapReversalChart from "@/components/GapReversalChart";
 import {
   GrConfig, Universe, GrScanResult, GrBacktest, GrChart,
   getGrConfig, setGrConfig, getGrUniverses, runGrScan, getGrScanResult,
@@ -189,7 +189,7 @@ export default function GapReversalPage() {
                         {expanded === r.symbol && (
                           <tr><td colSpan={3 + exits.length} className="px-3 py-3 bg-gray-950">
                             {chartCache[r.symbol]
-                              ? <PatternShapeChart candles={chartCache[r.symbol].candles} shapes={chartCache[r.symbol].shapes} height={340} focusDate={chartCache[r.symbol].focus_date ?? undefined} />
+                              ? <GapReversalChart candles={chartCache[r.symbol].candles} shapes={chartCache[r.symbol].shapes} rsi={chartCache[r.symbol].rsi} bands={chartCache[r.symbol].bands} height={440} />
                               : <div className="text-gray-500 text-xs">Loading chart…</div>}
                           </td></tr>
                         )}
@@ -240,7 +240,7 @@ export default function GapReversalPage() {
                       {expanded === r.symbol && (
                         <tr><td colSpan={9 + cfg.rr_targets.length} className="px-3 py-3 bg-gray-950">
                           {chartCache[r.symbol]
-                            ? <PatternShapeChart candles={chartCache[r.symbol].candles} shapes={chartCache[r.symbol].shapes} height={340} focusDate={chartCache[r.symbol].focus_date ?? undefined} />
+                            ? <GapReversalChart candles={chartCache[r.symbol].candles} shapes={chartCache[r.symbol].shapes} rsi={chartCache[r.symbol].rsi} bands={chartCache[r.symbol].bands} height={440} />
                             : <div className="text-gray-500 text-xs">Loading chart…</div>}
                         </td></tr>
                       )}

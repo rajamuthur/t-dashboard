@@ -8,7 +8,7 @@ import IndexTicker from "@/components/IndexTicker";
 import {
   LayoutDashboard, TrendingUp, Calendar, CandlestickChart, Settings, LogOut,
   ChevronDown, CalendarDays, Heart, PieChart, Activity, Radio, BookOpen,
-  Shapes, Target, FlaskConical, Scale, Eye, GitFork, Bell,
+  Shapes, Target, FlaskConical, Scale, Eye, GitFork, Bell, Repeat,
   type LucideIcon,
 } from "lucide-react";
 
@@ -34,6 +34,7 @@ const GROUPS: { key: string; label: string; items: NavItem[] }[] = [
     { href: "/dashboard/vcp",      label: "VCP Scanner",   icon: Target },
     { href: "/dashboard/swing",    label: "Swing Trading", icon: TrendingUp },
     { href: "/dashboard/ema",      label: "EMA Cross",     icon: GitFork },
+    { href: "/dashboard/gap-reversal", label: "Gap Reversal", icon: Repeat },
     { href: "/dashboard/futures",  label: "Futures Basis", icon: Scale },
   ]},
   { key: "trading", label: "Trading", items: [

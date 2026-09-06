@@ -15,7 +15,9 @@ interface Props {
   height?: number;
 }
 
-const toTime = (d: string) => Math.floor(Date.parse(d.includes(" ") ? d.replace(" ", "T") : d) / 1000);
+// Daily data → use business-day format ("YYYY-MM-DD"). Feeding UNIX timestamps
+// makes lightweight-charts treat it as intraday and mislabel the date axis.
+const toTime = (d: string): any => d.slice(0, 10);
 const NO_SCALE = () => null;
 
 // Two stacked charts (price + RSI) with synced time axes — reliable across the
@@ -55,7 +57,7 @@ export default function GapReversalChart({ candles, shapes, rsi, bands, height =
     const markers = shapes.filter(s => s.type === "marker").map((m: any) => ({
       time: toTime(m.date) as any, position: m.position === "belowBar" ? "belowBar" : "aboveBar",
       color: m.color, shape: m.position === "belowBar" ? "arrowUp" : "arrowDown", text: m.text || "",
-    })).sort((a: any, b: any) => a.time - b.time);
+    })).sort((a: any, b: any) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0));
     if (markers.length) createSeriesMarkers(candle, markers as any);
 
     const cr = createChart(rsiRef.current, {

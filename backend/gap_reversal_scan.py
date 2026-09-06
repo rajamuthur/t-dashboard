@@ -36,7 +36,8 @@ DEFAULT_CFG = {
     "band_upper": 90.0,
     "band_middle": 50.0,
     "band_lower": 10.0,
-    "gap_pct": 1.5,            # |open-prevclose|/prevclose % that qualifies as a breakaway gap
+    "gap_pct": 0.2,            # |open-prevclose|/prevclose % that qualifies as a gap
+                               # (small — the RSI is already at an extreme, so the stop risk is minimal)
     "rr_targets": [3, 5, 7, 10],
     "max_hold_bars": 40,       # bars to wait for target/stop before timing out
     "universe": "fo",

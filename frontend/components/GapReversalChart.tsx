@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import {
-  createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries,
+  createChart, ColorType, CandlestickSeries, LineSeries, HistogramSeries, BaselineSeries,
   createSeriesMarkers, LineStyle, IChartApi,
 } from "lightweight-charts";
 
@@ -63,11 +63,35 @@ export default function GapReversalChart({ candles, shapes, rsi, bands, height =
       timeScale: { borderColor: "#cbd5e1", visible: true, rightOffset: 4 },
     });
     const b = bands || { upper: 90, middle: 50, lower: 10 };
-    const rsiLine = cr.addSeries(LineSeries, {
-      color: "#7c3aed", lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+    const rsiData = rsi.filter(r => r.rsi != null).map(r => ({ time: toTime(r.date) as any, value: r.rsi as number }));
+    const clear = "rgba(0,0,0,0)";
+
+    // Overbought fill (green above the upper band) — a baseline whose only visible
+    // part is the fill above the band; the line itself is hidden.
+    const obFill = cr.addSeries(BaselineSeries, {
+      baseValue: { type: "price", price: b.upper },
+      topLineColor: clear, topFillColor1: "rgba(34,197,94,0.45)", topFillColor2: "rgba(34,197,94,0.04)",
+      bottomLineColor: clear, bottomFillColor1: clear, bottomFillColor2: clear,
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
     });
-    rsiLine.setData(rsi.filter(r => r.rsi != null).map(r => ({ time: toTime(r.date) as any, value: r.rsi as number })));
+    obFill.setData(rsiData);
+    // Oversold fill (red below the lower band).
+    const osFill = cr.addSeries(BaselineSeries, {
+      baseValue: { type: "price", price: b.lower },
+      topLineColor: clear, topFillColor1: clear, topFillColor2: clear,
+      bottomLineColor: clear, bottomFillColor1: "rgba(239,68,68,0.04)", bottomFillColor2: "rgba(239,68,68,0.5)",
+      priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      autoscaleInfoProvider: NO_SCALE,
+    });
+    osFill.setData(rsiData);
+
+    const rsiLine = cr.addSeries(LineSeries, {
+      color: "#7c3aed", lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+      autoscaleInfoProvider: NO_SCALE,
+    });
+    rsiLine.setData(rsiData);
+    rsiLine.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.06 } });
     const rsiMa = cr.addSeries(LineSeries, { color: "#eab308", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: NO_SCALE });
     rsiMa.setData(rsi.filter(r => r.rsi_ma != null).map(r => ({ time: toTime(r.date) as any, value: r.rsi_ma as number })));
     [{ v: b.upper, c: "#ef4444" }, { v: b.middle, c: "#94a3b8" }, { v: b.lower, c: "#22c55e" }].forEach(x =>

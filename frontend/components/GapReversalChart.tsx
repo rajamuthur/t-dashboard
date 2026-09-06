@@ -65,7 +65,11 @@ export default function GapReversalChart({ candles, shapes, rsi, bands, height =
       timeScale: { borderColor: "#cbd5e1", visible: true, rightOffset: 4 },
     });
     const b = bands || { upper: 90, middle: 50, lower: 10 };
-    const rsiData = rsi.filter(r => r.rsi != null).map(r => ({ time: toTime(r.date) as any, value: r.rsi as number }));
+    // Keep ALL bars (warm-up as whitespace) so this chart shares the exact same
+    // time domain as the price chart — otherwise logical-range sync shifts the RSI
+    // panel (and its date axis) by the warm-up count, misaligning bars vs dates.
+    const rsiData = rsi.map(r => r.rsi != null ? { time: toTime(r.date) as any, value: r.rsi as number } : { time: toTime(r.date) as any });
+    const rsiMaData = rsi.map(r => r.rsi_ma != null ? { time: toTime(r.date) as any, value: r.rsi_ma as number } : { time: toTime(r.date) as any });
     const clear = "rgba(0,0,0,0)";
 
     // Overbought fill (green above the upper band) — a baseline whose only visible
@@ -95,7 +99,7 @@ export default function GapReversalChart({ candles, shapes, rsi, bands, height =
     rsiLine.setData(rsiData);
     rsiLine.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.06 } });
     const rsiMa = cr.addSeries(LineSeries, { color: "#eab308", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: NO_SCALE });
-    rsiMa.setData(rsi.filter(r => r.rsi_ma != null).map(r => ({ time: toTime(r.date) as any, value: r.rsi_ma as number })));
+    rsiMa.setData(rsiMaData);
     [{ v: b.upper, c: "#ef4444" }, { v: b.middle, c: "#94a3b8" }, { v: b.lower, c: "#22c55e" }].forEach(x =>
       rsiLine.createPriceLine({ price: x.v, color: x.c, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: String(x.v) }));
 
@@ -106,6 +110,20 @@ export default function GapReversalChart({ candles, shapes, rsi, bands, height =
       try { other.timeScale().setVisibleLogicalRange(r); } catch {} syncing = false;
     });
     link(cp, cr); link(cr, cp);
+
+    // Sync the crosshair so hovering a candle shows its date on the (visible) RSI
+    // time-axis, and vice-versa.
+    let xhair = false;
+    cp.subscribeCrosshairMove(p => {
+      if (xhair) return; xhair = true;
+      try { p.time === undefined ? cr.clearCrosshairPosition() : cr.setCrosshairPosition(50, p.time, rsiLine); } catch {}
+      xhair = false;
+    });
+    cr.subscribeCrosshairMove(p => {
+      if (xhair) return; xhair = true;
+      try { p.time === undefined ? cp.clearCrosshairPosition() : cp.setCrosshairPosition(candles[candles.length - 1].close, p.time, candle); } catch {}
+      xhair = false;
+    });
     cp.timeScale().fitContent();
 
     const ro = new ResizeObserver(() => {

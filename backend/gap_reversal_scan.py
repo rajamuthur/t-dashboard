@@ -255,17 +255,20 @@ def _chart_sync(symbol: str, cfg: dict) -> dict:
     shapes: list[dict] = [{"type": "polyline", "color": "#2563eb", "label": f"EMA {cfg['ema_length']}", "points": ema_pts}]
     rsi_pts = [{"date": dates[k], "rsi": None if np.isnan(a["rsi"][k]) else round(float(a["rsi"][k]), 2),
                 "rsi_ma": None if np.isnan(a["rsi_ma"][k]) else round(float(a["rsi_ma"][k]), 2)} for k in range(len(df))]
-    # Mark signals on the price panel.
+    # Mark signals on the price panel — only the FIRST bar of each run (RSI-on-EMA
+    # stays at an extreme for many consecutive bars, so mark the episode once).
     focus = dates[-1][:10]
+    prev = None
     for i in range(1, len(df)):
         d = signal_at(a, i, cfg)
-        if d:
+        if d and d != prev:
             focus = dates[i][:10]
             shapes.append({"type": "marker", "date": dates[i],
                            "price": float(a["l"][i]) if d == "BULL" else float(a["h"][i]),
                            "color": "#22c55e" if d == "BULL" else "#ef4444",
                            "position": "belowBar" if d == "BULL" else "aboveBar",
                            "text": "L" if d == "BULL" else "S"})
+        prev = d
     return {"candles": candles, "shapes": shapes, "rsi": rsi_pts,
             "bands": {"upper": cfg["band_upper"], "middle": cfg["band_middle"], "lower": cfg["band_lower"]},
             "focus_date": focus}

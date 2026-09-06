@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { Play, RefreshCw, ChevronDown, ChevronRight, TrendingUp, TrendingDown, Save, Send } from "lucide-react";
 import GapReversalChart from "@/components/GapReversalChart";
 import {
-  GrConfig, Universe, GrScanResult, GrBacktest, GrChart, GrWatch,
-  getGrConfig, setGrConfig, getGrUniverses, runGrScan, getGrScanResult,
+  GrConfig, Universe, GrBacktest, GrChart, GrWatch,
+  getGrConfig, setGrConfig, getGrUniverses,
   runGrBacktest, getGrBacktestResult, getGrChart,
   getGrWatch, updateGrWatch, sendGrWatchEod, checkGrGaps,
 } from "@/lib/gapReversalApi";
@@ -21,12 +21,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 export default function GapReversalPage() {
   const [cfg, setCfg] = useState<GrConfig | null>(null);
   const [universes, setUniverses] = useState<Universe[]>([]);
-  const [tab, setTab] = useState<"watch" | "backtest" | "scanner">("watch");
+  const [tab, setTab] = useState<"watch" | "backtest">("watch");
+  const [showSettings, setShowSettings] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const [scan, setScan] = useState<GrScanResult | null>(null);
-  const [scanning, setScanning] = useState(false);
   const [bt, setBt] = useState<GrBacktest | null>(null);
   const [btRunning, setBtRunning] = useState(false);
   const [dir, setDir] = useState<"ALL" | "BULL" | "BEAR">("ALL");
@@ -42,7 +41,6 @@ export default function GapReversalPage() {
   useEffect(() => {
     getGrConfig().then(setCfg).catch(() => setMsg("Failed to load settings"));
     getGrUniverses().then(setUniverses).catch(() => {});
-    getGrScanResult().then(r => { if (r?.rows?.length) setScan(r); }).catch(() => {});
     getGrBacktestResult().then(r => { if (r?.total_signals) setBt(r); }).catch(() => {});
     getGrWatch().then(w => { if (w?.rows) setWatch(w); }).catch(() => {});
   }, []);
@@ -65,12 +63,6 @@ export default function GapReversalPage() {
     finally { setSaving(false); }
   }
 
-  async function doScan() {
-    if (!(await save())) return;
-    setScanning(true); setMsg(null);
-    try { setScan(await runGrScan()); } catch (e: any) { setMsg((e?.message || "Scan failed").replace(/^API \d+:\s*/, "")); }
-    finally { setScanning(false); }
-  }
   async function doBacktest() {
     if (!(await save())) return;
     setBtRunning(true); setMsg(null);
@@ -115,10 +107,15 @@ export default function GapReversalPage() {
         {msg && <span className="text-xs text-gray-300">{msg}</span>}
       </div>
 
-      {/* Settings */}
-      <div className="rounded-lg border border-gray-800 bg-gray-900 p-3 space-y-3">
-        <div className="text-[10px] uppercase tracking-wider text-gray-500">Settings (all configurable)</div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+      {/* Settings (collapsed by default) */}
+      <div className="rounded-lg border border-gray-800 bg-gray-900 p-3">
+        <button onClick={() => setShowSettings(v => !v)}
+          className="w-full flex items-center justify-between text-[10px] uppercase tracking-wider text-gray-500 hover:text-gray-300">
+          <span>Settings (all configurable)</span>
+          {showSettings ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </button>
+        {showSettings && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mt-3">
           <Field label="Universe">
             <select value={cfg.universe} onChange={e => set("universe", e.target.value)} className={inp}>
               {universes.map(u => <option key={u.key} value={u.key}>{u.label} ({u.count})</option>)}
@@ -153,11 +150,12 @@ export default function GapReversalPage() {
             </button>
           </div>
         </div>
+        )}
       </div>
 
       {/* Tabs */}
       <div className="flex items-center gap-1 text-xs">
-        {([["watch", "Entry for tomorrow"], ["backtest", "Backtest"], ["scanner", "Scanner"]] as const).map(([t, label]) => (
+        {([["watch", "Entry for tomorrow"], ["backtest", "Backtest"]] as const).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className={`px-3 py-1.5 rounded border ${tab === t ? "bg-brand-600 border-brand-500 text-white" : "bg-gray-800 border-gray-700 text-gray-300 hover:text-white"}`}>{label}</button>
         ))}
       </div>
@@ -297,55 +295,6 @@ export default function GapReversalPage() {
         </div>
       )}
 
-      {tab === "scanner" && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-3">
-            <button onClick={doScan} disabled={scanning} className="flex items-center gap-1 px-3 py-1.5 rounded bg-brand-600 hover:bg-brand-500 text-white text-xs disabled:opacity-50">
-              {scanning ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />} {scanning ? "Scanning…" : "Run scan"}
-            </button>
-            {scan && <span className="text-xs text-gray-400">{scan.rows.length} setups · {scan.counts.bull} long / {scan.counts.bear} short · {scan.counts.scanned} stocks</span>}
-          </div>
-          {scan && (
-            <div className="overflow-x-auto rounded-lg border border-gray-800">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-900 text-gray-400"><tr>
-                  <th className="px-2 py-2 w-6"></th><th className="px-3 py-2 text-left">Symbol</th><th className="px-3 py-2 text-left">Dir</th>
-                  <th className="px-3 py-2 text-left">Gap date</th><th className="px-3 py-2 text-right">Gap %</th><th className="px-3 py-2 text-right">RSI</th>
-                  <th className="px-3 py-2 text-right">Entry≈</th><th className="px-3 py-2 text-right">Stop</th><th className="px-3 py-2 text-right">Risk %</th>
-                  {cfg.rr_targets.map(k => <th key={k} className="px-3 py-2 text-right">1:{k}</th>)}
-                </tr></thead>
-                <tbody className="divide-y divide-gray-800/60 bg-gray-950">
-                  {scan.rows.length === 0 && <tr><td colSpan={9 + cfg.rr_targets.length} className="text-center py-5 text-gray-500">No current setups.</td></tr>}
-                  {scan.rows.map(r => (
-                    <>
-                      <tr key={r.symbol + r.gap_date} onClick={() => toggleChart(r.symbol)} className="hover:bg-gray-900/50 cursor-pointer">
-                        <td className="px-2 py-2 text-gray-500">{loadingChart === r.symbol ? <RefreshCw size={11} className="animate-spin" /> : expanded === r.symbol ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
-                        <td className="px-3 py-2 font-mono text-brand-300">{r.symbol}</td>
-                        <td className="px-3 py-2">{r.signal === "BULL" ? <span className="text-green-400 flex items-center gap-1"><TrendingUp size={12} />Long</span> : <span className="text-red-400 flex items-center gap-1"><TrendingDown size={12} />Short</span>}</td>
-                        <td className="px-3 py-2 text-gray-400">{r.gap_date}</td>
-                        <td className={`px-3 py-2 text-right font-mono ${rColor(r.gap_pct)}`}>{r.gap_pct}%</td>
-                        <td className="px-3 py-2 text-right font-mono text-gray-300">{r.rsi_ema}</td>
-                        <td className="px-3 py-2 text-right font-mono text-gray-200">{inr(r.entry)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-red-300">{inr(r.stop)}</td>
-                        <td className="px-3 py-2 text-right font-mono text-gray-400">{r.risk_pct}%</td>
-                        {cfg.rr_targets.map(k => <td key={k} className="px-3 py-2 text-right font-mono text-green-300">{inr(r.targets[String(k)])}</td>)}
-                      </tr>
-                      {expanded === r.symbol && (
-                        <tr><td colSpan={9 + cfg.rr_targets.length} className="px-3 py-3 bg-gray-950">
-                          {chartCache[r.symbol]
-                            ? <GapReversalChart candles={chartCache[r.symbol].candles} shapes={chartCache[r.symbol].shapes} rsi={chartCache[r.symbol].rsi} bands={chartCache[r.symbol].bands} height={440} />
-                            : <div className="text-gray-500 text-xs">Loading chart…</div>}
-                        </td></tr>
-                      )}
-                    </>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {!scan && !scanning && <div className="text-gray-500 text-sm">Run the scan to find stocks that formed the setup on the latest bar.</div>}
-        </div>
-      )}
     </div>
   );
 }

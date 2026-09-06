@@ -136,6 +136,32 @@ def compute(df: pd.DataFrame, cfg: dict) -> dict:
             "dates": [str(x) for x in df.index]}
 
 
+def _fetch_daily_long(sym: str, days: int = 1400) -> pd.DataFrame | None:
+    """Fresh daily candles straight from Fyers (chunked ≤350d — Fyers caps a daily
+    request), so the chart is always current (the synced `candles` table lags)."""
+    from datetime import timedelta
+    from .downloaders.fyers import FyersDownloader
+    d = FyersDownloader()
+    end = datetime.now()
+    cur = end - timedelta(days=days)
+    frames = []
+    while cur < end:
+        ce = min(cur + timedelta(days=350), end)
+        try:
+            df = d.fetch_daily(sym, cur.strftime("%Y-%m-%d"), ce.strftime("%Y-%m-%d"), resolution="D")
+            if df is not None and not df.empty:
+                frames.append(df)
+        except Exception:
+            pass
+        cur = ce + timedelta(days=1)
+    if not frames:
+        return None
+    out = pd.concat(frames)
+    out = out[~out.index.duplicated(keep="first")].sort_index()
+    out.index = out.index.strftime("%Y-%m-%d")   # clean date strings (match candles table)
+    return out
+
+
 def signal_at(a: dict, i: int, cfg: dict) -> str | None:
     """'BULL' / 'BEAR' / None for a signal whose gap bar is index i.
     RSI-zone is read at i-1 (state going INTO the gap), gap at i."""
@@ -241,10 +267,12 @@ async def run_scan(cfg: dict | None = None) -> dict:
 def _chart_sync(symbol: str, cfg: dict) -> dict:
     # Rows display the short name (ADANIENSOL); the candles table keys are NSE:…-EQ.
     sym = symbol if ":" in symbol else f"NSE:{symbol.strip().upper()}-EQ"
-    con = sqlite3.connect(_get_db_path())
-    df = _load(con, sym, cfg["timeframe"])
-    con.close()
-    if df.empty:
+    df = _fetch_daily_long(sym)                       # fresh from Fyers (always current)
+    if df is None or df.empty:                        # fallback: synced candles table
+        con = sqlite3.connect(_get_db_path())
+        df = _load(con, sym, cfg["timeframe"])
+        con.close()
+    if df is None or df.empty:
         return {"candles": [], "shapes": [], "rsi": [], "focus_date": None}
     a = compute(df, cfg)
     dates = a["dates"]
